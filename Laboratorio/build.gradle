@@ -22,7 +22,8 @@ dependencies {
 compileJava {
     options.compilerArgs += ["-Xlint:deprecation"]
 }
-mainClassName = "it.unitn.ds1.HelloExample"
+mainClassName = "it.unitn.ds1.multicast.CausalMulticast"
+// mainClassName = "it.unitn.ds1.helloworld.HelloExample"
 
 run {
     standardInput = System.in
