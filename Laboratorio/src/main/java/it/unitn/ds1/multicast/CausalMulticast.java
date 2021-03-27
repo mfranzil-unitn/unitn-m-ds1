@@ -15,6 +15,9 @@ public class CausalMulticast {
     final private static int N_LISTENERS = 4; // number of listening actors
 
     public static void main(String[] args) {
+        System.out.print(">>> Wait for the chats to stop and press ENTER <<<" +
+                "\n\n\nActors joining...\n");
+        System.out.flush();
 
         // create the 'helloakka' actor system
         final ActorSystem system = ActorSystem.create("helloakka");
@@ -31,14 +34,30 @@ public class CausalMulticast {
         group.add(system.actorOf(
                 it.unitn.ds1.multicast.Chatter.props(id++, "a"), // this one will catch up with the topic "a"
                 "chatter1"));
-//
-//        group.add(system.actorOf(
-//                it.unitn.ds1.multicast.Chatter.props(id++, "b"), // this one will start the topic "b"
-//                "chatter2"));
-//
-//        group.add(system.actorOf(
-//                it.unitn.ds1.multicast.Chatter.props(id++, "b"), // this one will catch up with the topic "b"
-//                "chatter3"));
+
+        group.add(system.actorOf(
+                it.unitn.ds1.multicast.Chatter.props(id++, "b"), // this one will start the topic "b"
+                "chatter2"));
+
+        group.add(system.actorOf(
+                it.unitn.ds1.multicast.Chatter.props(id++, "b"), // this one will catch up with the topic "b"
+                "chatter3"));
+
+        group.add(system.actorOf(
+                it.unitn.ds1.multicast.Chatter.props(id++, "c"), // this one will start the topic "b"
+                "chatter4"));
+
+        group.add(system.actorOf(
+                it.unitn.ds1.multicast.Chatter.props(id++, "c"), // this one will catch up with the topic "b"
+                "chatter5"));
+
+        group.add(system.actorOf(
+                it.unitn.ds1.multicast.Chatter.props(id++, "d"), // this one will start the topic "b"
+                "chatter6"));
+
+        group.add(system.actorOf(
+                it.unitn.ds1.multicast.Chatter.props(id++, "d"), // this one will catch up with the topic "b"
+                "chatter7"));
 
         // TODO 1: create additional actors in a different conversation
 
@@ -60,9 +79,10 @@ public class CausalMulticast {
 
         // tell the first chatter to start conversation
         group.get(0).tell(new StartChatMsg(), null);
-        //group.get(2).tell(new StartChatMsg(), null);
+        group.get(2).tell(new StartChatMsg(), null);
+        group.get(4).tell(new StartChatMsg(), null);
+        group.get(6).tell(new StartChatMsg(), null);
         try {
-            System.out.println(">>> Wait for the chats to stop and press ENTER <<<");
             System.in.read();
 
             // after chats stop, send actors a message to print their logs
@@ -70,6 +90,7 @@ public class CausalMulticast {
             for (ActorRef peer : group) {
                 peer.tell(msg, null);
             }
+            System.out.flush();
             System.out.println(">>> Press ENTER to exit <<<");
             System.in.read();
         } catch (IOException ioe) {

@@ -6,11 +6,12 @@ import akka.actor.Props;
 
 import java.io.Serializable;
 import java.util.*;
+import java.util.concurrent.ConcurrentLinkedDeque;
 
 class Chatter extends AbstractActor {
 
     // number of chat messages to send
-    final static int N_MESSAGES = 5;
+    final static int N_MESSAGES = 10;
     private final Random rnd = new Random();
     private List<ActorRef> group; // the list of peers (the multicast group)
     private int sendCount = 0;    // number of sent messages
@@ -21,7 +22,26 @@ class Chatter extends AbstractActor {
     // a buffer storing all received chat messages
     private final StringBuffer chatHistory = new StringBuffer();
 
-    private final PriorityQueue<ChatMsg> buffer = new PriorityQueue<>();
+    private final ConcurrentLinkedDeque<ChatMsg> buffer = new ConcurrentLinkedDeque<>();
+
+    /*public final boolean isVcLess(int[] vc1, int[] vc2) {
+        assert (vc1.length == vc2.length);
+        boolean res = true;
+
+        for (int i = 0; i < vc1.length; i++) {
+            if (vc1[i] > vc2[i]) {
+                res = false;
+                break;
+            }
+        }
+
+        return res;
+    }
+
+    public final boolean isVcConcurrent(int[] vc1, int[] vc2) {
+        return !isVcLess(vc1, vc2) && !isVcLess(vc2, vc1);
+    }
+*/
     // TODONE 2: provide a buffer for out-of-order messages
 
     /* -- Message types ------------------------------------------------------- */
@@ -40,7 +60,7 @@ class Chatter extends AbstractActor {
     }
 
     // Chat message
-    public static class ChatMsg implements Serializable, Comparable<ChatMsg> {
+    public static class ChatMsg implements Serializable {
         public final String topic;   // "topic" of the conversation
         public final int n;          // the number of the reply in the current topic
         public final int senderId;   // the ID of the message sender
@@ -52,15 +72,6 @@ class Chatter extends AbstractActor {
             this.senderId = senderId;
             this.vc = new int[vc.length];
             for (int i = 0; i < vc.length; i++) this.vc[i] = vc[i];
-        }
-
-        @Override
-        public int compareTo(ChatMsg o) {
-            int res = 0;
-            for (int i = 0; i < o.vc.length; i++) {
-                res += this.vc[i] - o.vc[i];
-            }
-            return res;
         }
 
         @Override
@@ -107,7 +118,6 @@ class Chatter extends AbstractActor {
     }
 
     private void multicast(Serializable m) {
-
         // randomly arrange peers
         List<ActorRef> shuffledGroup = new ArrayList<>(group);
         Collections.shuffle(shuffledGroup);
@@ -119,22 +129,13 @@ class Chatter extends AbstractActor {
 
                 // simulate network delays using sleep
                 try {
-                    Thread.sleep(rnd.nextInt(100));
+                    Thread.sleep(rnd.nextInt(1));
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 }
             }
         }
     }
-
-  /*
-  private void multicast(Serializable m) {
-    for (ActorRef p: group) {
-      if (!p.equals(getSelf()))
-      p.tell(m, getSelf());
-    }
-  }
-  */
 
     // Here we define the mapping between the received message types
     // and our actor methods
@@ -164,36 +165,32 @@ class Chatter extends AbstractActor {
 
     private void onChatMsg(ChatMsg msg) {
         // "deliver" the message to the simulated chat user
-        System.out.println("Actor " + id + " on " + msg.topic + msg.n + ":\n"
+        /*System.out.println("Actor " + id + " on " + msg.topic + msg.n + ":\n"
                 + "    this vc: " + Arrays.toString(this.vc) + "\n"
                 + "    message vc: " + Arrays.toString(msg.vc) + "\n"
-                + "    offset: " + deliverable(msg));
+                + "    offset: " + isDeliverable(msg));*/
 
-        var isDeliverable = deliverable(msg);
-
-        for (int i = 0; i < msg.vc.length; i++) {
-            if (msg.vc[i] > this.vc[i]) {
-                this.vc[i] = msg.vc[i];
-            }
-        }
-
-        if (isDeliverable) {
+        emptyBuffer();
+        if (isDeliverable(msg)) {
             deliver(msg);
         } else {
             //System.out.println("Adding to buffer...");
             buffer.add(msg);
         }
+        emptyBuffer();
 
         // TODONE 4: deliver only if the message is in-order
         // TODONE 5 hint: once a message is delivered, update the vector clock...
 
     }
+
     private void deliver(ChatMsg m) {
-        emptyBuffer();
+        updateClock(m);
         appendToHistory(m);
-        if (myTopic != null) {
-            System.out.print(m.topic.equals(myTopic) + " - " + (sendCount < N_MESSAGES) + " ---");
-        System.out.printf("Actor %d sending message %s n %d (total sent: %d)\n", id, myTopic, m.n + 1, sendCount);}
+        //if (myTopic != null) {
+        //System.out.print(m.topic.equals(myTopic) + " - " + (sendCount < N_MESSAGES) + " ---");
+        //System.out.printf("Actor %d sending message %s n %d (total sent: %d)\n", id, myTopic, m.n + 1, sendCount);
+        //}
         // if the message is on my topic and I still have something to say...
         if (m.topic.equals(myTopic) && sendCount < N_MESSAGES) {
             // reply to the received message with an incremented value and the same topic
@@ -205,29 +202,69 @@ class Chatter extends AbstractActor {
 
     }
 
+    private void updateClock(ChatMsg msg) {
+        for (int i = 0; i < msg.vc.length; i++) {
+            this.vc[i] = Math.max(this.vc[i], msg.vc[i]);
+        }
+    }
+
     private void appendToHistory(ChatMsg m) {
         chatHistory.append(m.topic).append(m.n).append(" ");
     }
 
     private void printHistory(PrintHistoryMsg msg) {
-        emptyBuffer();
-        System.out.printf("%02d: %s\n", this.id, chatHistory);
+        System.out.printf("%s %02d: %s\n", verifyHistoryIntegrity(), this.id, chatHistory);
+    }
+
+    private String verifyHistoryIntegrity() {
+        String[] history = this.chatHistory.toString().split(" ");
+        HashSet<String> topics = new HashSet<>();
+        for (String s : history) {
+            String currentTopic = s.split("[0-9]*")[0];
+            topics.add(currentTopic);
+        }
+        for (String t : topics) {
+            int j = 0;
+            for (String s : history) {
+                if (s.contains(Integer.toString(j)) && s.contains(t)) {
+                    j++;
+                }
+            }
+            if (j != 2*N_MESSAGES) {
+                return "[x]";
+            }
+        }
+        return "[o]";
     }
 
     private void emptyBuffer() {
-        while (!buffer.isEmpty()) {
-            ChatMsg removed = buffer.remove();
-            System.out.println("Removed " + removed + " by actor " + id);
-            appendToHistory(removed);
+        while (true) {
+            ChatMsg deliverable = null;
+
+            for (ChatMsg m : buffer) {
+                if (isDeliverable(m)) {
+                    deliverable = m;
+                    deliver(deliverable);
+                    System.out.flush();
+                    buffer.remove(m);
+                }
+            }
+
+            if (deliverable == null) {
+                break;
+            }
+            //System.out.println("Removed " + deliverable + " by actor " + id);
         }
     }
 
-    private boolean deliverable(ChatMsg msg) {
+    private boolean isDeliverable(ChatMsg msg) {
+        System.out.printf("act %d attempting delivery of %s\n", id, msg);
         if (msg.vc.length != this.vc.length) {
             throw new ArrayIndexOutOfBoundsException("Different array sizes");
         }
 
         if (msg.vc[msg.senderId] != this.vc[msg.senderId] + 1) {
+            System.out.printf(" ordering failure\n");
             return false;
         }
 
@@ -240,9 +277,11 @@ class Chatter extends AbstractActor {
             if (msg.vc[i] <= this.vc[i]) {
                 continue;
             }
+            System.out.printf(" vc [%d] failure\n", i);
             return false;
             //    res = res - (receiverVc[i] - messageVc[i]);
         }
+        System.out.printf(" successful\n");
         return true;
         // 1 -> è giusto
         // 2 -> 1 in avanti
