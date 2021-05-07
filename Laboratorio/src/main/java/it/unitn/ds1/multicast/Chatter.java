@@ -230,7 +230,7 @@ class Chatter extends AbstractActor {
                     j++;
                 }
             }
-            if (j != 2*N_MESSAGES) {
+            if (j != 2 * N_MESSAGES) {
                 return "[x]";
             }
         }
