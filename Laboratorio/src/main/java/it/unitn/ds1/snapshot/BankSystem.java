@@ -3,6 +3,8 @@ package it.unitn.ds1.snapshot;
 import akka.actor.ActorRef;
 import akka.actor.ActorSystem;
 
+import it.unitn.ds1.snapshot.Bank.JoinGroupMsg;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -21,7 +23,7 @@ public class BankSystem {
         }
 
         // Send join messages to the banks to inform them of the whole group
-        Bank.JoinGroupMsg start = new Bank.JoinGroupMsg(group);
+        JoinGroupMsg start = new JoinGroupMsg(group);
         for (ActorRef peer : group) {
             peer.tell(start, ActorRef.noSender());
         }

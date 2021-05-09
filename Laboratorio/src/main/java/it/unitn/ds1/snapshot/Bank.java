@@ -94,12 +94,7 @@ public class Bank extends AbstractActor {
     private void randomTransfer() {
         int to = rnd.nextInt(this.peers.size());
         int amount = 1;
-
-        // if (stateCaptured) {
-        //this.moneyInTransit -= amount;
-        // } else {
         this.balance -= amount;
-        // }
 
         // model a random network/processing delay
         try {
@@ -123,6 +118,7 @@ public class Bank extends AbstractActor {
     private void captureState() {
         this.stateCaptured = true;
         this.capturedBalance = this.balance;
+        moneyInTransit = 0;
 
         // TODONE 1: save current balance and enter snapshot mode
         // TODONE note: print your state only after the end of the snapshot protocol for this node
@@ -145,31 +141,29 @@ public class Bank extends AbstractActor {
     }
 
     private void onMoney(Money msg) {
-        if (stateCaptured) {
+        this.balance += msg.amount;
+
+        if (stateCaptured && !tokensReceived.contains(getSender())) {
             this.moneyInTransit += msg.amount;
-        } else {
-            this.balance += msg.amount;
         }
         // TODONE 2: implement logic for Money messages during snapshot
     }
 
     private void onToken(Token token) {
+        this.snapId = token.snapId;
+
         tokensReceived.add(getSender());
 
         if (!stateCaptured) {
-            this.snapId = token.snapId;
             captureState();
             sendTokens();
-
-            return;
         }
 
         if (tokensReceived.size() == peers.size()) {
-            tokensReceived.clear();
             System.out.println("Bank " + id + " snapId: " + snapId + " state: " + (capturedBalance + moneyInTransit));
-            balance = balance + moneyInTransit;
+            capturedBalance = 0;
             stateCaptured = false;
-            moneyInTransit = 0;
+            tokensReceived.clear();
         }
         // TODONE 3: manage the first Token reception and the snapshot termination for this node
     }

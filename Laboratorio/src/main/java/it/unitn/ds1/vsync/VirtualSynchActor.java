@@ -6,6 +6,7 @@ import akka.actor.Props;
 import it.unitn.ds1.vsync.VirtualSynchManager.CrashReportMsg;
 import it.unitn.ds1.vsync.VirtualSynchManager.JoinNodeMsg;
 import scala.concurrent.duration.Duration;
+import scala.util.Random;
 
 import java.io.Serializable;
 import java.util.*;
@@ -218,11 +219,13 @@ public class VirtualSynchActor extends AbstractActor {
     }
 
     private boolean isViewFlushed(int requestedViewId) {
+        if (this.flushes.get(requestedViewId) == null) return false;
+        if (this.proposedView.get(requestedViewId + 1) == null) return false;
         return this.flushes.get(requestedViewId).containsAll(this.proposedView.get(requestedViewId + 1));
     }
 
     private void putInFlushes(int requestedViewId, ActorRef e) {
-        this.flushes.computeIfAbsent(requestedViewId, k -> new HashSet<ActorRef>());
+        this.flushes.computeIfAbsent(requestedViewId, k -> new HashSet<>());
         this.flushes.get(requestedViewId).add(e);
     }
 
@@ -235,7 +238,9 @@ public class VirtualSynchActor extends AbstractActor {
         // thus this method always returns false
         // return false;
 
-        return !this.flushes.get(this.viewId).isEmpty();
+        // contains
+
+        return this.flushes.containsKey(this.viewId) && proposedView.containsKey(this.viewId + 1);
 
         // TODONE implement effective view change status check
     }
@@ -459,14 +464,14 @@ public class VirtualSynchActor extends AbstractActor {
         multicast(new ViewFlushMsg(this.viewId), group);
 
         // TODO (HINT) if you simulate a crash during a flush multicast, change the actor behavior
-        /*if (nextCrash.name().equals(CrashType.ViewFlushMsg.name())) {
+        if (nextCrash.name().equals(CrashType.ViewFlushMsg.name())) {
             getContext().become(crashed());
-        }*/
+        }
 
         getContext().system().scheduler().scheduleOnce(
                 Duration.create(500, TimeUnit.MILLISECONDS),  // how frequently generate them
                 getSelf(),                                          // destination actor reference
-                new FlushTimeoutMsg(this.viewId + 2),         // the message to send
+                new FlushTimeoutMsg(this.viewId + 1),         // the message to send
                 getContext().system().dispatcher(),                 // system dispatcher
                 getSelf()                                           // source of the message (myself)
         );
