@@ -1,10 +1,10 @@
-package it.unitn.ds1.vsync;
+package it.unitn.ds1.vsyncsolution;
 
 import akka.actor.AbstractActor;
 import akka.actor.ActorRef;
 import akka.actor.Props;
-import it.unitn.ds1.vsync.VirtualSynchManager.CrashReportMsg;
-import it.unitn.ds1.vsync.VirtualSynchManager.JoinNodeMsg;
+import it.unitn.ds1.vsyncsolution.VirtualSynchManager.CrashReportMsg;
+import it.unitn.ds1.vsyncsolution.VirtualSynchManager.JoinNodeMsg;
 import scala.concurrent.duration.Duration;
 
 import java.io.Serializable;
@@ -84,7 +84,7 @@ public class VirtualSynchActor extends AbstractActor {
         public final List<ActorRef> group;   // an array of group members
 
         public JoinGroupMsg(List<ActorRef> group) {
-            this.group = List.copyOf(group);
+            this.group = Collections.unmodifiableList(new ArrayList<>(group));
         }
     }
 
@@ -129,11 +129,9 @@ public class VirtualSynchActor extends AbstractActor {
 
         public ViewChangeMsg(int viewId, Set<ActorRef> proposedView) {
             this.viewId = viewId;
-            this.proposedView = Set.copyOf(proposedView);
+            this.proposedView = Collections.unmodifiableSet(new HashSet<>(proposedView));
         }
     }
-
-    // TODONE use the suggested flush messages (below) for view change
 
     public static class ViewFlushMsg implements Serializable {
         public final Integer viewId;
@@ -194,7 +192,6 @@ public class VirtualSynchActor extends AbstractActor {
             // check if the node should crash
             if (m.getClass().getSimpleName().equals(nextCrash.name())) {
                 if (i >= nextCrashAfter) {
-                    //System.out.println(getSelf().path().name() + " CRASH after " + i + " " + nextCrash.name());
                     break;
                 }
             }
@@ -217,46 +214,26 @@ public class VirtualSynchActor extends AbstractActor {
         return i;
     }
 
-    private boolean isViewFlushed(int requestedViewId) {
-        /*System.out.println((this.getSelf().path().name() + " - " + requestedViewId
-                + " - Flushes "
-                + (this.flushes.get(requestedViewId) == null) + "; prop "
-                + (this.proposedView.get(requestedViewId + 1) == null)));
+    private void putInFlushes(int viewId, ActorRef flushSender) {
+        Set<ActorRef> flushed = flushes.getOrDefault(viewId, new HashSet<>());
+        flushed.add(flushSender);
+        flushes.put(viewId, flushed);
+    }
 
-        if (this.flushes.get(requestedViewId) == null) {
-            this.flushes.computeIfAbsent(requestedViewId, k -> new HashSet<>());
-            return false;
-        }
-        if (this.proposedView.get(requestedViewId + 1) == null) {
-            this.proposedView.computeIfAbsent(requestedViewId + 1, k -> new HashSet<>());
-            return false;
-        }*/
-
-        if(flushes.containsKey(requestedViewId) && proposedView.containsKey(requestedViewId + 1)) {
-            return flushes.get(requestedViewId).containsAll(proposedView.get(requestedViewId + 1));
+    private boolean isViewFlushed(int viewId) {
+        if (flushes.containsKey(viewId) && proposedView.containsKey(viewId + 1)) {
+            return flushes.get(viewId).containsAll(proposedView.get(viewId + 1));
         }
         return false;
-
-        //return this.flushes.get(requestedViewId).containsAll(this.proposedView.get(requestedViewId + 1));
     }
-
-    private void putInFlushes(int requestedViewId, ActorRef e) {
-        Set<ActorRef> flushed = flushes.getOrDefault(requestedViewId, new HashSet<>());
-        flushed.add(e);
-        flushes.put(requestedViewId, flushed);
-    }
-
-    // TODONE create void putInFlushes and boolean isViewFlushed methods
-    // TODONE (HINT) a view is flushed if all flush messages associated to it have been received
 
     private boolean isViewChanging() {
-        // the view change is instantaneous in the incomplete implementation,
-        // thus this method always returns false
-        // return false;
 
-        return this.flushes.containsKey(this.viewId) && proposedView.containsKey(this.viewId + 1);
-
-        // TODONE implement effective view change status check
+        // in this implementation, a node adds a flush for itself upon receiving a ViewChangeMsg,
+        // and old flushes are removed when a view is installed;
+        // thus, checking if there is an ongoing view change is trivial:
+        // if there is any flush message, there is a view change that has not completed yet.
+        return !flushes.isEmpty();
     }
 
     private void deliver(ChatMsg m, boolean deferred) {
@@ -264,7 +241,7 @@ public class VirtualSynchActor extends AbstractActor {
             membersSeqno.put(m.sender, m.seqno);
             System.out.println(
                     getSelf().path().name() + " delivers " + m.seqno
-                            + " from " + m.sender.path().name() + " in view " + (deferred ? m.viewId : this.viewId)
+                            + " from " + m.sender.path().name() + " in view " + (deferred ? m.viewId : this.viewId) // TODO
                             + (deferred ? " (deferred)" : "")
             );
         }
@@ -275,6 +252,7 @@ public class VirtualSynchActor extends AbstractActor {
     }
 
     private void deferredDeliver(int prevViewId, int nextViewId) {
+
         // a joining node delivers only those messages related to the first view
         if (joining) {
             for (ChatMsg m : deferredMsgSet) {
@@ -297,18 +275,21 @@ public class VirtualSynchActor extends AbstractActor {
     }
 
     private void installView(int viewId) {
+
         // check if there are messages waiting to be delivered in the new view
         deferredDeliver(this.viewId, viewId);
 
         // update view ID
         this.viewId = viewId;
 
+        //System.out.println(getSelf().path().name() + " flushes before view change " + this.viewId + " " + flushes);
+
         // remove flushes, unstable and deferred messages of the old views
+        flushes.entrySet().removeIf(entry -> entry.getKey() < this.viewId);
         unstableMsgSet.removeIf(unstableMsg -> unstableMsg.viewId < this.viewId);
         deferredMsgSet.removeIf(deferredMsg -> deferredMsg.viewId <= this.viewId);
 
-        // TODONE also remove old view flush messages!
-        flushes.entrySet().removeIf(entry -> entry.getKey() < this.viewId);
+        //System.out.println(getSelf().path().name() + " flushes after view change " + this.viewId + " " + flushes);
 
         // update current view
         currentView.clear();
@@ -338,6 +319,7 @@ public class VirtualSynchActor extends AbstractActor {
     }
 
     private void onSendChatMsg(SendChatMsg msg) {
+
         // schedule next ChatMsg
         getContext().system().scheduler().scheduleOnce(
                 Duration.create(rnd.nextInt(1000) + 300, TimeUnit.MILLISECONDS),
@@ -348,9 +330,7 @@ public class VirtualSynchActor extends AbstractActor {
         );
 
         // avoid transmitting while joining and during view changes
-        if (joining || isViewChanging()) {
-            return;
-        }
+        if (joining || isViewChanging()) return;
 
         // prepare chat message and add it to the unstable set
         String content = "Message " + seqno + " in view " + currentView;
@@ -387,6 +367,7 @@ public class VirtualSynchActor extends AbstractActor {
     }
 
     private void onChatMsg(ChatMsg msg) {
+
         // joining nodes ignore incoming messages,
         // unless those that may belong to the first view that will be installed eventually
         if (joining) {
@@ -397,7 +378,7 @@ public class VirtualSynchActor extends AbstractActor {
             return;
         }
 
-        // ignore own messages (may be sent during flush protocol)
+        // ignore own messages (may have been sent during flush protocol)
         if (getSelf().equals(msg.sender)) return;
 
         // the node will deliver the message, but it will also be kept in the unstable set;
@@ -417,7 +398,7 @@ public class VirtualSynchActor extends AbstractActor {
         // this way we prevent setting a timeout during flush protocol
         if (getSender().equals(msg.sender)) {
             getContext().system().scheduler().scheduleOnce(
-                    Duration.create(300, TimeUnit.MILLISECONDS),  // how frequently generate them
+                    Duration.create(1000, TimeUnit.MILLISECONDS),  // how frequently generate them
                     getSelf(),                                          // destination actor reference
                     new StableTimeoutMsg(msg, getSender()),             // the message to send
                     getContext().system().dispatcher(),                 // system dispatcher
@@ -428,14 +409,12 @@ public class VirtualSynchActor extends AbstractActor {
 
     private void onStableChatMsg(StableChatMsg msg) {
         unstableMsgSet.remove(msg.stableMsg);
-        //System.out.println(getSelf().path().name() + " stabilized " + msg.stableMsg.seqno + " from " + msg.stableMsg.sender.path().name());
     }
 
     private void onStableTimeoutMsg(StableTimeoutMsg msg) {
+
         // check if the message is still unstable
-        if (!unstableMsgSet.contains(msg.unstableMsg)) {
-            return;
-        }
+        if (!unstableMsgSet.contains(msg.unstableMsg)) return;
 
         // alert the manager about the crashed node
         Set<ActorRef> crashed = new HashSet<>();
@@ -444,6 +423,7 @@ public class VirtualSynchActor extends AbstractActor {
     }
 
     private void onCrashedChatMsg(ChatMsg msg) {
+
         // deliver immediately or ignore the message;
         // used to debug virtual synchrony correctness
         if (msg.viewId >= this.viewId) {
@@ -459,19 +439,21 @@ public class VirtualSynchActor extends AbstractActor {
     }
 
     private void onViewChangeMsg(ViewChangeMsg msg) {
+
+        System.out.println(
+                getSelf().path().name() + " initiates view change " + this.viewId + "->" + msg.viewId
+                        + " " + this.proposedView + "->" + msg.proposedView
+        );
+
         // check whether the node is in the view;
         // the message may have been caused by another node joining
         // and this one may not be part of the view yet
-        if (!msg.proposedView.contains(getSelf())) {
-            return;
-        }
+        if (!msg.proposedView.contains(getSelf())) return;
 
         // store the proposed view to begin transition
         proposedView.put(msg.viewId, new HashSet<>(msg.proposedView));
 
-        // TODONE implement view flushing (do not install the view right away)...
-
-        // TODONE (HINT) first, send all unstable messages
+        // first, send all unstable messages (to the nodes in the new view)
         for (ChatMsg unstableMsg : unstableMsgSet) {
             boolean resend = unstableMsg.viewId == this.viewId;
             System.out.println(getSelf().path().name() + " may resend (" + resend + ") " + unstableMsg.seqno + " from " + unstableMsg.sender.path().name());
@@ -480,55 +462,53 @@ public class VirtualSynchActor extends AbstractActor {
             }
         }
 
-        // TODONE (HINT) then, send flush messages for the PREVIOUS view
-        multicast(new ViewFlushMsg(msg.viewId - 1),
-                proposedView.get(msg.viewId));
+        // then, multicast flush messages
+        multicast(new ViewFlushMsg(msg.viewId - 1), proposedView.get(msg.viewId));
 
-        // TODONE (HINT) if you simulate a crash during a flush multicast, change the actor behavior
+        // check if the node should crash
         if (nextCrash.name().equals(CrashType.ViewFlushMsg.name())) {
             getContext().become(crashed());
         }
 
+        // add self to already flushed for the previous view
         putInFlushes(msg.viewId - 1, getSelf());
 
-        // TODONE (HINT) prepare to timeout if flushes are not received in time
-        // TODONE (HINT) ...but keep in mind that this node may have already received all of them!
+        // check if all flushes were already received;
+        // (ViewChangeMsg from the manager could be delayed wrt flushes)
         if (isViewFlushed(msg.viewId - 1)) {
-            // install
             installView(msg.viewId);
         } else {
+
             // send message to self in order to timeout while waiting flushes
             getContext().system().scheduler().scheduleOnce(
                     Duration.create(500, TimeUnit.MILLISECONDS), // how frequently generate them
                     getSelf(),                                          // destination actor reference
-                    new it.unitn.ds1.vsyncsolution.VirtualSynchActor.FlushTimeoutMsg(this.viewId),                   // the message to send
+                    new FlushTimeoutMsg(this.viewId),                   // the message to send
                     getContext().system().dispatcher(),                 // system dispatcher
                     getSelf()                                           // source of the message (myself)
             );
         }
-
     }
 
     private void onViewFlushMsg(ViewFlushMsg msg) {
-        // TODONE add sender to flush map at the corresponding view ID
-        this.flushes.computeIfAbsent(msg.viewId, k -> new HashSet<>());
+        System.out.println(getSelf().path().name() + " adds flush of view " + msg.viewId + " from " + getSender().path().name());
+
+        // add sender to flush map at the corresponding view ID
         putInFlushes(msg.viewId, getSender());
 
-        System.out.println(this.flushes.get(msg.viewId));
-
-        // TODONE check if all flushed were received; in that case install view
+        // check if all flushed were received
         if (isViewFlushed(msg.viewId)) {
             installView(msg.viewId + 1);
         }
     }
 
     private void onFlushTimeoutMsg(FlushTimeoutMsg msg) {
-        // TODONE check if there still are missing flushes
-        if (!flushes.containsKey(msg.viewId)) {
-            return;
-        }
+        //System.out.println(getSelf().path().name() + " timeouts with current flushes " + flushes);
 
-        // TODONE find all nodes whose flush has not been received and report them as crashed
+        // check if there still are missing flushes
+        if (!flushes.containsKey(msg.viewId)) return;
+
+        // find all nodes whose flush has not been received
         Set<ActorRef> crashed = new HashSet<>(proposedView.get(msg.viewId + 1));
         crashed.removeAll(flushes.get(msg.viewId));
         manager.tell(new CrashReportMsg(crashed), getSelf());
@@ -537,7 +517,7 @@ public class VirtualSynchActor extends AbstractActor {
     private void onCrashMsg(CrashMsg msg) {
         nextCrash = msg.nextCrash;
         nextCrashAfter = msg.nextCrashAfter;
-        flushes.clear(); // TODONE clear flushes
+        flushes.clear();
         proposedView.clear();
         deferredMsgSet.clear();
     }
@@ -551,7 +531,7 @@ public class VirtualSynchActor extends AbstractActor {
 
         // schedule first ChatMsg
         getContext().system().scheduler().scheduleOnce(
-                Duration.create(1, TimeUnit.SECONDS),         // when to send the message
+                Duration.create(2, TimeUnit.SECONDS),        // when to send the message
                 getSelf(),                                          // destination actor reference
                 new SendChatMsg(),                                  // the message to send
                 getContext().system().dispatcher(),                 // system dispatcher
@@ -575,8 +555,6 @@ public class VirtualSynchActor extends AbstractActor {
                 .match(CrashMsg.class, this::onCrashMsg)
                 .match(RecoveryMsg.class, msg -> System.out.println(getSelf().path().name() + " ignoring RecoveryMsg"))
                 .build();
-
-        // TODONE match flush messages
     }
 
     final AbstractActor.Receive crashed() {
