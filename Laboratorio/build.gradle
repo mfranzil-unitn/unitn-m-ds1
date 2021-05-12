@@ -23,7 +23,8 @@ compileJava {
 //mainClassName = "it.unitn.ds1.multicast.CausalMulticast"
 //mainClassName = "it.unitn.ds1.snapshot.BankSystem"
 //mainClassName = "it.unitn.ds1.helloworld.HelloExample"
-mainClassName = "it.unitn.ds1.vsync.VirtualSynch"
+//mainClassName = "it.unitn.ds1.vsync.VirtualSynch"
+mainClassName = "it.unitn.ds1.twophasecommit.TwoPhaseCommit"
 
 run {
     standardInput = System.in
