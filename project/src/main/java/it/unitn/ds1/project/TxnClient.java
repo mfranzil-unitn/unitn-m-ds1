@@ -1,23 +1,17 @@
-package it.unitn.ds1;
+package it.unitn.ds1.project;
 
 import akka.actor.AbstractActor;
 import akka.actor.ActorRef;
 import akka.actor.Cancellable;
 import akka.actor.Props;
+import it.unitn.ds1.project.message.*;
 import scala.concurrent.duration.Duration;
 
-import java.io.Serializable;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
 public class TxnClient extends AbstractActor {
-
-    public static void main(String[] args) {
-
-    }
 
     private static final double COMMIT_PROBABILITY = 0.8;
     private static final double WRITE_PROBABILITY = 0.5;
