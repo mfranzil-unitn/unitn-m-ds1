@@ -5,6 +5,14 @@ import akka.actor.ActorRef;
 import akka.actor.Cancellable;
 import akka.actor.Props;
 import it.unitn.ds1.project.message.*;
+import it.unitn.ds1.project.message.txn.begin.TxnAcceptMsg;
+import it.unitn.ds1.project.message.txn.begin.TxnAcceptTimeoutMsg;
+import it.unitn.ds1.project.message.txn.begin.TxnBeginMsg;
+import it.unitn.ds1.project.message.txn.end.TxnEndMsg;
+import it.unitn.ds1.project.message.txn.end.TxnResultMsg;
+import it.unitn.ds1.project.message.txn.read.TxnReadRequestMsg;
+import it.unitn.ds1.project.message.txn.read.TxnReadResultMsg;
+import it.unitn.ds1.project.message.txn.write.TxnWriteRequestMsg;
 import scala.concurrent.duration.Duration;
 
 import java.util.List;
@@ -56,7 +64,6 @@ public class TxnClient extends AbstractActor {
 
     // start a new TXN: choose a random coordinator, send TxnBeginMsg and set timeout
     void beginTxn() {
-
         // some delay between transactions from the same client
         try {
             Thread.sleep(10);
@@ -97,15 +104,14 @@ public class TxnClient extends AbstractActor {
 
     // READ two items (will move some amount from the value of the first to the second)
     void readTwo() {
-
         // read two different keys
         firstKey = r.nextInt(maxKey + 1);
         int randKeyOffset = 1 + r.nextInt(maxKey - 1);
         secondKey = (firstKey + randKeyOffset) % (maxKey + 1);
 
         // READ requests
-        currentCoordinator.tell(new ReadMsg(clientId, firstKey), getSelf());
-        currentCoordinator.tell(new ReadMsg(clientId, secondKey), getSelf());
+        currentCoordinator.tell(new TxnReadRequestMsg(clientId, firstKey), getSelf());
+        currentCoordinator.tell(new TxnReadRequestMsg(clientId, secondKey), getSelf());
 
         // delete the current read values
         firstValue = null;
@@ -116,12 +122,11 @@ public class TxnClient extends AbstractActor {
 
     // WRITE two items (called with probability WRITE_PROBABILITY after readTwo() values are returned)
     void writeTwo() {
-
         // take some amount from one value and pass it to the other, then request writes
         Integer amountTaken = 0;
         if (firstValue >= 1) amountTaken = 1 + r.nextInt(firstValue);
-        currentCoordinator.tell(new WriteMsg(clientId, firstKey, firstValue - amountTaken), getSelf());
-        currentCoordinator.tell(new WriteMsg(clientId, secondKey, secondValue + amountTaken), getSelf());
+        currentCoordinator.tell(new TxnWriteRequestMsg(clientId, firstKey, firstValue - amountTaken), getSelf());
+        currentCoordinator.tell(new TxnWriteRequestMsg(clientId, secondKey, secondValue + amountTaken), getSelf());
         System.out.println("CLIENT " + clientId + " WRITE #" + numOpDone
                 + " taken " + amountTaken
                 + " (" + firstKey + ", " + (firstValue - amountTaken) + "), ("
@@ -130,7 +135,7 @@ public class TxnClient extends AbstractActor {
 
     /*-- Message handlers ----------------------------------------------------- */
 
-    private void onWelcomeMsg(WelcomeMsg msg) {
+    private void onWelcomeMsg(ClientWelcomeMsg msg) {
         this.coordinators = msg.coordinators;
         System.out.println(coordinators);
         this.maxKey = msg.maxKey;
@@ -151,7 +156,7 @@ public class TxnClient extends AbstractActor {
         if (!acceptedTxn) beginTxn();
     }
 
-    private void onReadResultMsg(ReadResultMsg msg) {
+    private void onReadResultMsg(TxnReadResultMsg msg) {
         System.out.println("CLIENT " + clientId + " READ RESULT (" + msg.key + ", " + msg.value + ")");
 
         // save the read value(s)
@@ -188,10 +193,10 @@ public class TxnClient extends AbstractActor {
     @Override
     public Receive createReceive() {
         return receiveBuilder()
-                .match(WelcomeMsg.class, this::onWelcomeMsg)
+                .match(ClientWelcomeMsg.class, this::onWelcomeMsg)
                 .match(TxnAcceptMsg.class, this::onTxnAcceptMsg)
                 .match(TxnAcceptTimeoutMsg.class, this::onTxnAcceptTimeoutMsg)
-                .match(ReadResultMsg.class, this::onReadResultMsg)
+                .match(TxnReadResultMsg.class, this::onReadResultMsg)
                 .match(TxnResultMsg.class, this::onTxnResultMsg)
                 .match(StopMsg.class, this::onStopMsg)
                 .build();

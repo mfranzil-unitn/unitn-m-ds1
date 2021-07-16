@@ -1,4 +1,4 @@
-package it.unitn.ds1.project.message;
+package it.unitn.ds1.project.message.txn.end;
 
 import java.io.Serializable;
 

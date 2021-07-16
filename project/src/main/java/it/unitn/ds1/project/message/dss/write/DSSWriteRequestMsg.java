@@ -1,19 +1,17 @@
-package it.unitn.ds1.project.message;
+package it.unitn.ds1.project.message.dss.write;
 
 import java.io.Serializable;
 
-public class TxnWriteMsg implements Serializable {
+public class DSSWriteRequestMsg implements Serializable {
 
     public final String transactionID;
     public final Integer key;
     public final Integer value;
 
-    public TxnWriteMsg(String tID, Integer key, Integer value){
-
+    public DSSWriteRequestMsg(String tID, Integer key, Integer value) {
         this.transactionID = tID;
         this.key = key;
         this.value = value;
-
     }
 
 }
