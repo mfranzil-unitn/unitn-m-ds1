@@ -6,7 +6,7 @@ import akka.actor.Props;
 import it.unitn.ds1.project.message.TxnReadMsg;
 import it.unitn.ds1.project.message.TxnReadResponseMsg;
 import it.unitn.ds1.project.message.TxnWriteMsg;
-import it.unitn.ds1.project.message.WriteResultMsg;
+import it.unitn.ds1.project.message.WriteResultMessage;
 import it.unitn.ds1.project.model.DataItem;
 import it.unitn.ds1.project.model.PrivateWorkspace;
 
@@ -87,7 +87,7 @@ public class TxnDSS extends TxnAbstractNode {
         }
 
         currentPrivateWorkspace.get(msg.key).setValue(msg.value);
-        this.getSender().tell(new WriteResultMsg(msg.transactionID, true), getSelf());
+        this.getSender().tell(new WriteResultMessage(msg.transactionID), getSelf());
 
     }
 
@@ -197,6 +197,7 @@ public class TxnDSS extends TxnAbstractNode {
                 case ABORT:
                     this.lockedItems.getOrDefault(msg.transactionID, new ArrayList<>()).forEach(DataItem::releaseLock);
                     this.lockedItems.remove(msg.transactionID);
+                    this.privateWorkspaces.remove(msg.transactionID);
 
 
             }
