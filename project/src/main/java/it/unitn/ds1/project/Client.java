@@ -19,7 +19,7 @@ import java.util.List;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
-public class TxnClient extends AbstractActor {
+public class Client extends AbstractActor {
 
     private static final double COMMIT_PROBABILITY = 0.8;
     private static final double WRITE_PROBABILITY = 0.5;
@@ -49,7 +49,7 @@ public class TxnClient extends AbstractActor {
 
     /*-- Actor constructor ---------------------------------------------------- */
 
-    public TxnClient(int clientId) {
+    public Client(int clientId) {
         this.clientId = clientId;
         this.numAttemptedTxn = 0;
         this.numCommittedTxn = 0;
@@ -57,7 +57,20 @@ public class TxnClient extends AbstractActor {
     }
 
     static public Props props(int clientId) {
-        return Props.create(TxnClient.class, () -> new TxnClient(clientId));
+        return Props.create(Client.class, () -> new Client(clientId));
+    }
+
+    @Override
+    public Receive createReceive() {
+        return receiveBuilder()
+                .match(ClientWelcomeMsg.class, this::onClientWelcome)
+                .match(StopMsg.class, this::onStop)
+                // CLIENT <-- COORDINATOR
+                .match(TxnAcceptMsg.class, this::onTxnAccept)
+                .match(TxnAcceptTimeoutMsg.class, this::onTxnAcceptTimeout)
+                .match(TxnReadResultMsg.class, this::onReadResult)
+                .match(TxnResultMsg.class, this::onTxnResult)
+                .build();
     }
 
     /*-- Actor methods -------------------------------------------------------- */
@@ -133,30 +146,32 @@ public class TxnClient extends AbstractActor {
                 + secondKey + ", " + (secondValue + amountTaken) + ")");
     }
 
-    /*-- Message handlers ----------------------------------------------------- */
+    /*-- General messages ----------------------------------------------------- */
 
-    private void onWelcomeMsg(ClientWelcomeMsg msg) {
+    private void onClientWelcome(ClientWelcomeMsg msg) {
         this.coordinators = msg.coordinators;
         System.out.println(coordinators);
         this.maxKey = msg.maxKey;
         beginTxn();
     }
 
-    private void onStopMsg(StopMsg msg) {
+    private void onStop(StopMsg msg) {
         getContext().stop(getSelf());
     }
 
-    private void onTxnAcceptMsg(TxnAcceptMsg msg) {
+    /*-- Transaction messages ----------------------------------------------------- */
+
+    private void onTxnAccept(TxnAcceptMsg msg) {
         acceptedTxn = true;
         acceptTimeout.cancel();
         readTwo();
     }
 
-    private void onTxnAcceptTimeoutMsg(TxnAcceptTimeoutMsg msg) throws InterruptedException {
+    private void onTxnAcceptTimeout(TxnAcceptTimeoutMsg msg) throws InterruptedException {
         if (!acceptedTxn) beginTxn();
     }
 
-    private void onReadResultMsg(TxnReadResultMsg msg) {
+    private void onReadResult(TxnReadResultMsg msg) {
         System.out.println("CLIENT " + clientId + " READ RESULT (" + msg.key + ", " + msg.value + ")");
 
         // save the read value(s)
@@ -180,7 +195,7 @@ public class TxnClient extends AbstractActor {
         }
     }
 
-    private void onTxnResultMsg(TxnResultMsg msg) throws InterruptedException {
+    private void onTxnResult(TxnResultMsg msg) throws InterruptedException {
         if (msg.commit) {
             numCommittedTxn++;
             System.out.println("CLIENT " + clientId + " COMMIT OK (" + numCommittedTxn + "/" + numAttemptedTxn + ")");
@@ -188,17 +203,5 @@ public class TxnClient extends AbstractActor {
             System.out.println("CLIENT " + clientId + " COMMIT FAIL (" + (numAttemptedTxn - numCommittedTxn) + "/" + numAttemptedTxn + ")");
         }
         beginTxn();
-    }
-
-    @Override
-    public Receive createReceive() {
-        return receiveBuilder()
-                .match(ClientWelcomeMsg.class, this::onWelcomeMsg)
-                .match(TxnAcceptMsg.class, this::onTxnAcceptMsg)
-                .match(TxnAcceptTimeoutMsg.class, this::onTxnAcceptTimeoutMsg)
-                .match(TxnReadResultMsg.class, this::onReadResultMsg)
-                .match(TxnResultMsg.class, this::onTxnResultMsg)
-                .match(StopMsg.class, this::onStopMsg)
-                .build();
     }
 }

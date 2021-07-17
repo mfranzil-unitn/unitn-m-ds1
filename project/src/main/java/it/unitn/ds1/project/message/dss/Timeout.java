@@ -1,11 +1,8 @@
 package it.unitn.ds1.project.message.dss;
 
-import java.io.Serializable;
-
-public class Timeout implements Serializable {
-    public final String transactionID;
+public class Timeout extends DSSMessage {
 
     public Timeout(String transactionID) {
-        this.transactionID = transactionID;
+        super(transactionID);
     }
 }

@@ -1,17 +1,14 @@
 package it.unitn.ds1.project.message.dss.read;
 
-import java.io.Serializable;
+import it.unitn.ds1.project.message.dss.DSSMessage;
 
-public class DSSReadResultMsg implements Serializable {
-
-    public final String transactionID;
+public class DSSReadResultMsg extends DSSMessage {
+    public final Integer key;
     public final Integer value;
 
-    public DSSReadResultMsg(String transactionID, Integer value) {
-
-        this.transactionID = transactionID;
+    public DSSReadResultMsg(String transactionID, Integer key, Integer value) {
+        super(transactionID);
+        this.key = key;
         this.value = value;
-
     }
-
 }
