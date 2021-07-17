@@ -6,6 +6,7 @@ import akka.actor.Props;
 import it.unitn.ds1.project.message.TxnReadMsg;
 import it.unitn.ds1.project.message.TxnReadResponseMsg;
 import it.unitn.ds1.project.message.TxnWriteMsg;
+import it.unitn.ds1.project.message.WriteResultMsg;
 import it.unitn.ds1.project.model.DataItem;
 import it.unitn.ds1.project.model.PrivateWorkspace;
 
@@ -86,6 +87,7 @@ public class TxnDSS extends TxnAbstractNode {
         }
 
         currentPrivateWorkspace.get(msg.key).setValue(msg.value);
+        this.getSender().tell(new WriteResultMsg(msg.transactionID, true), getSelf());
 
     }
 
@@ -116,10 +118,7 @@ public class TxnDSS extends TxnAbstractNode {
 
         if( !commit ){
             this.lockedItems.put(msg.transactionID,locked);
-
-            // TODO: Add self-sending an abort message
-            //this.getSelf().tell(new Abort)
-
+            this.getSelf().tell(new DecisionResponse(msg.transactionID, Decision.ABORT), getSelf());
             v = Vote.NO;
         } else {
 
@@ -127,7 +126,7 @@ public class TxnDSS extends TxnAbstractNode {
 
         }
 
-        // TODO: Forward decision to coordinator and remember
+        this.getSender().tell(new VoteResponse(msg.transactionID, v), getSelf());
 
 
 
@@ -141,6 +140,7 @@ public class TxnDSS extends TxnAbstractNode {
         }    // simulate a crash
         if (id == 2) delay(4000);              // simulate a delay
         */
+        /*
         vote = r.nextDouble() < COMMIT_PROBABILITY ? Vote.YES : Vote.NO;
 
         if (vote == Vote.NO) {
@@ -149,6 +149,7 @@ public class TxnDSS extends TxnAbstractNode {
         print("sending vote " + vote);
         this.coordinator.tell(new VoteResponse(vote), getSelf());
         setTimeout(DECISION_TIMEOUT);
+        */
     }
 
     public void onTimeout(Timeout msg) {

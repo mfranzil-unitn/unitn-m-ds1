@@ -152,14 +152,23 @@ class VoteRequest implements Serializable {
 }
 
 class VoteResponse implements Serializable {
+    public final String transactionID;
     public final Vote vote;
 
-    public VoteResponse(Vote v) {
+    public VoteResponse(String transactionID, Vote v) {
+        this.transactionID = transactionID;
         vote = v;
     }
 }
 
 class DecisionRequest implements Serializable {
+
+    public final String transactionID;
+
+    public DecisionRequest(String transactionID){
+        this.transactionID = transactionID;
+    }
+
 }
 
 class DecisionResponse implements Serializable {
