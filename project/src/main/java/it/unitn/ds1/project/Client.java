@@ -4,7 +4,8 @@ import akka.actor.AbstractActor;
 import akka.actor.ActorRef;
 import akka.actor.Cancellable;
 import akka.actor.Props;
-import it.unitn.ds1.project.message.*;
+import it.unitn.ds1.project.message.ClientWelcomeMsg;
+import it.unitn.ds1.project.message.StopMsg;
 import it.unitn.ds1.project.message.txn.begin.TxnAcceptMsg;
 import it.unitn.ds1.project.message.txn.begin.TxnAcceptTimeoutMsg;
 import it.unitn.ds1.project.message.txn.begin.TxnBeginMsg;
@@ -15,6 +16,7 @@ import it.unitn.ds1.project.message.txn.read.TxnReadResultMsg;
 import it.unitn.ds1.project.message.txn.write.TxnWriteRequestMsg;
 import scala.concurrent.duration.Duration;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
@@ -23,6 +25,7 @@ public class Client extends AbstractActor {
 
     private static final double COMMIT_PROBABILITY = 0.8;
     private static final double WRITE_PROBABILITY = 0.5;
+
     private static final int MIN_TXN_LENGTH = 20;
     private static final int MAX_TXN_LENGTH = 40;
     private static final int RAND_LENGTH_RANGE = MAX_TXN_LENGTH - MIN_TXN_LENGTH + 1;
@@ -98,12 +101,12 @@ public class Client extends AbstractActor {
 
         // timeout for confirmation of TXN by the coordinator (sent to self)
         acceptTimeout = getContext().system().scheduler().scheduleOnce(
-                Duration.create(500, TimeUnit.MILLISECONDS),
+                Duration.create(5000, TimeUnit.MILLISECONDS),
                 getSelf(),
                 new TxnAcceptTimeoutMsg(), // message sent to myself
                 getContext().system().dispatcher(), getSelf()
         );
-        System.out.println("CLIENT " + clientId + " BEGIN");
+        log("BEGIN");
     }
 
     // end the current TXN sending TxnEndMsg to the coordinator
@@ -112,7 +115,7 @@ public class Client extends AbstractActor {
         currentCoordinator.tell(new TxnEndMsg(clientId, doCommit), getSelf());
         firstValue = null;
         secondValue = null;
-        System.out.println("CLIENT " + clientId + " END");
+        log("END");
     }
 
     // READ two items (will move some amount from the value of the first to the second)
@@ -129,8 +132,7 @@ public class Client extends AbstractActor {
         // delete the current read values
         firstValue = null;
         secondValue = null;
-
-        System.out.println("CLIENT " + clientId + " READ #" + numOpDone + " (" + firstKey + "), (" + secondKey + ")");
+        log("READ #" + numOpDone + " (" + firstKey + "), (" + secondKey + ")");
     }
 
     // WRITE two items (called with probability WRITE_PROBABILITY after readTwo() values are returned)
@@ -140,7 +142,7 @@ public class Client extends AbstractActor {
         if (firstValue >= 1) amountTaken = 1 + r.nextInt(firstValue);
         currentCoordinator.tell(new TxnWriteRequestMsg(clientId, firstKey, firstValue - amountTaken), getSelf());
         currentCoordinator.tell(new TxnWriteRequestMsg(clientId, secondKey, secondValue + amountTaken), getSelf());
-        System.out.println("CLIENT " + clientId + " WRITE #" + numOpDone
+        log("WRITE #" + numOpDone
                 + " taken " + amountTaken
                 + " (" + firstKey + ", " + (firstValue - amountTaken) + "), ("
                 + secondKey + ", " + (secondValue + amountTaken) + ")");
@@ -162,17 +164,21 @@ public class Client extends AbstractActor {
     /*-- Transaction messages ----------------------------------------------------- */
 
     private void onTxnAccept(TxnAcceptMsg msg) {
+        log("received TxnAccept");
         acceptedTxn = true;
         acceptTimeout.cancel();
         readTwo();
     }
 
     private void onTxnAcceptTimeout(TxnAcceptTimeoutMsg msg) throws InterruptedException {
-        if (!acceptedTxn) beginTxn();
+        if (!acceptedTxn) {
+            log("Timed out, retrying...");
+            beginTxn();
+        }
     }
 
     private void onReadResult(TxnReadResultMsg msg) {
-        System.out.println("CLIENT " + clientId + " READ RESULT (" + msg.key + ", " + msg.value + ")");
+        log("READ RESULT (" + msg.key + ", " + msg.value + ")");
 
         // save the read value(s)
         if (msg.key.equals(firstKey)) firstValue = msg.value;
@@ -198,10 +204,23 @@ public class Client extends AbstractActor {
     private void onTxnResult(TxnResultMsg msg) throws InterruptedException {
         if (msg.commit) {
             numCommittedTxn++;
-            System.out.println("CLIENT " + clientId + " COMMIT OK (" + numCommittedTxn + "/" + numAttemptedTxn + ")");
+            log("COMMIT OK (" + numCommittedTxn + "/" + numAttemptedTxn + ")");
         } else {
-            System.out.println("CLIENT " + clientId + " COMMIT FAIL (" + (numAttemptedTxn - numCommittedTxn) + "/" + numAttemptedTxn + ")");
+            log("COMMIT FAIL (" + (numAttemptedTxn - numCommittedTxn) + "/" + numAttemptedTxn + ")");
         }
+
+        try {
+            System.out.println(">>> Press ENTER to continue <<<");
+            System.in.read();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
         beginTxn();
     }
+
+    void log(String s) {
+        System.out.format("%2d: %s\n", clientId, s);
+    }
+
 }

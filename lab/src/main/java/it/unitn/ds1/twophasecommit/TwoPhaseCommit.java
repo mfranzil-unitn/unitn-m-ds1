@@ -293,9 +293,15 @@ public class TwoPhaseCommit {
 
         public void onVoteRequest(VoteRequest msg) {
             this.coordinator = getSender();
-            if (id==0) {crash(10000); return;}    // simulate a crash
-            if (id==1) {crash(10000); return;}    // simulate a crash
-            if (id==2) delay(4000);              // simulate a delay
+            if (id == 0) {
+                crash(10000);
+                return;
+            }    // simulate a crash
+            if (id == 1) {
+                crash(10000);
+                return;
+            }    // simulate a crash
+            if (id == 2) delay(4000);              // simulate a delay
             if (predefinedVotes[this.id] == Vote.NO) {
                 fixDecision(Decision.ABORT);
             }

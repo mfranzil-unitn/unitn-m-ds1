@@ -29,17 +29,16 @@ public class DSS extends AbstractNode {
 
     private Map<String, ActorRef> coordinators = new HashMap<>();
     private final List<ActorRef> dataStores = new ArrayList<>();
-
-    private DSSVote vote;
+    private final Map<String, DSSVote> votes = new HashMap<>();
 
     private final Random r;
 
     public DSS(int id, int lowerBound) {
         super(id);
-        this.vote = null;
         this.r = new Random();
         for (int i = lowerBound; i < lowerBound + 10; i++) {
-            this.items.put(i, new DataItem(r.nextInt(), 1));
+         //   this.items.put(i, new DataItem(r.nextInt(), 1));
+            this.items.put(i, new DataItem(100, 1));
         }
     }
 
@@ -54,6 +53,9 @@ public class DSS extends AbstractNode {
                 .match(DSSWelcomeMsg.class, this::onDSSWelcome)
 
                 // COORDINATOR -> DSS
+                .match(DSSReadRequestMsg.class, this::onDSSReadRequest)
+                .match(DSSWriteRequestMsg.class, this::onDSSWriteRequest)
+
                 .match(DSSVoteRequest.class, this::onVoteRequest)
 
                 .match(DSSDecisionRequest.class, this::onDecisionRequest)
@@ -61,8 +63,6 @@ public class DSS extends AbstractNode {
 
                 .match(Timeout.class, this::onTimeout)
                 .match(Recovery.class, this::onRecovery)
-                .match(DSSReadRequestMsg.class, this::onDSSReadRequest)
-                .match(DSSWriteRequestMsg.class, this::onDSSWriteRequest)
                 .build();
     }
 
@@ -75,6 +75,7 @@ public class DSS extends AbstractNode {
     /* -- R/W messages -------------------------- */
 
     private void onDSSReadRequest(DSSReadRequestMsg msg) {
+        log("received DSSReadRequest for tID " + msg.transactionID + ", key: " + msg.key);
         PrivateWorkspace currentPrivateWorkspace = getWorkspace(msg.transactionID);
 
         if (!currentPrivateWorkspace.containsKey(msg.key)) {
@@ -87,9 +88,12 @@ public class DSS extends AbstractNode {
 
         ActorRef sender = getSender();
         sender.tell(responseMsg, this.getSelf());
+        log("sent DSSReadResponse");
     }
 
     private void onDSSWriteRequest(DSSWriteRequestMsg msg) {
+        log("received DSSWriteRequest for tID " + msg.transactionID + ", key: " + msg.key + ", value: " + msg.value);
+
         PrivateWorkspace currentPrivateWorkspace = getWorkspace(msg.transactionID);
 
         if (!currentPrivateWorkspace.containsKey(msg.key)) {
@@ -119,12 +123,13 @@ public class DSS extends AbstractNode {
     /* -- Commit messages ---------------------- */
 
     public void onVoteRequest(DSSVoteRequest msg) {
-        DSSVote v;
+        log("Received VoteRequest for tID " + msg.transactionID);
 
         PrivateWorkspace currentPrivateWorkspace =
                 this.privateWorkspaces.getOrDefault(msg.transactionID, new PrivateWorkspace());
 
-        boolean commit = true;
+         boolean commit = true;
+        // boolean commit = r.nextBoolean();
         List<DataItem> locked = new ArrayList<>();
 
         for (Map.Entry<Integer, DataItem> modifiedEntry : currentPrivateWorkspace.entrySet()) {
@@ -139,13 +144,14 @@ public class DSS extends AbstractNode {
         if (!commit) {
             this.lockedItems.put(msg.transactionID, locked);
             this.getSelf().tell(new DSSDecisionResponse(msg.transactionID, DSSDecision.ABORT), getSelf());
-            v = DSSVote.NO;
+            votes.put(msg.transactionID, DSSVote.NO);
+            log("sending vote ABORT");
         } else {
-            v = DSSVote.YES;
+            votes.put(msg.transactionID, DSSVote.YES);
+            log("sending vote COMMIT");
         }
 
-        log("sending vote " + vote);
-        this.getSender().tell(new DSSVoteResponse(msg.transactionID, v), getSelf());
+        this.getSender().tell(new DSSVoteResponse(msg.transactionID, votes.get(msg.transactionID)), getSelf());
         setTimeout(msg.transactionID, DECISION_TIMEOUT);
 
         /*if (id == 0) {
@@ -168,12 +174,17 @@ public class DSS extends AbstractNode {
 
     private void onDecisionResponse(DSSDecisionResponse msg) {
         if (msg.decision != null) {
+            timeouts.get(msg.transactionID).cancel();
             switch (msg.decision) {
                 case COMMIT:
-                    this.privateWorkspaces.get(msg.transactionID).forEach((key, value) -> {
-                        this.items.get(key).setValue(value.getValue());
-                        this.items.get(key).setVersion(value.getVersion());
-                    });
+                    PrivateWorkspace privateWorkspace = this.privateWorkspaces.get(msg.transactionID);
+
+                    if (privateWorkspace != null) {
+                        privateWorkspace.forEach((key, value) -> {
+                            this.items.get(key).setValue(value.getValue());
+                            this.items.get(key).setVersion(value.getVersion());
+                        });
+                    }
                 case ABORT:
                     this.coordinators.remove(msg.transactionID);
                     this.lockedItems.getOrDefault(msg.transactionID, new ArrayList<>())
@@ -188,10 +199,12 @@ public class DSS extends AbstractNode {
 
     @Override
     protected void onTimeout(Timeout msg) {
+        timeouts.remove(msg.transactionID);
+
         // we assume that vote request arrives sooner or later so no forced abort
-        log("---------" + hasDecided(msg.transactionID) + " - " + vote);
+        log("timeout: I have decided " + hasDecided(msg.transactionID) + " - " + votes.get(msg.transactionID));
         if (!hasDecided(msg.transactionID)) {
-            if (vote == DSSVote.YES) {
+            if (votes.get(msg.transactionID) == DSSVote.YES) {
                 log("Timeout. Asking around.");
                 multicast(new DSSDecisionRequest(msg.transactionID));
             }

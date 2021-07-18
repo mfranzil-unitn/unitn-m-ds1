@@ -1,6 +1,7 @@
 package it.unitn.ds1.project;
 
 import akka.actor.AbstractActor;
+import akka.actor.Cancellable;
 import it.unitn.ds1.project.message.dss.DSSMessage;
 import it.unitn.ds1.project.message.dss.Recovery;
 import it.unitn.ds1.project.message.dss.Timeout;
@@ -14,15 +15,18 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 public abstract class AbstractNode extends AbstractActor {
-    final static int VOTE_TIMEOUT = 2000;      // timeout for the votes, ms
-    final static int DECISION_TIMEOUT = 2000;  // timeout for the decision, ms
+    final static int VOTE_TIMEOUT = 5000;      // timeout for the votes, ms
+    final static int DECISION_TIMEOUT = 5000;  // timeout for the decision, ms
 
     protected int id;                           // node ID
+
     protected Map<String, DSSDecision> decision = null;
+    protected Map<String, Cancellable> timeouts;
 
     protected AbstractNode(int id) {
         this.id = id;
         this.decision = new HashMap<>();
+        this.timeouts = new HashMap<>();
     }
 
     // abstract methods to be implemented in extending classes
@@ -37,19 +41,19 @@ public abstract class AbstractNode extends AbstractActor {
 
     // schedule a Timeout message in specified time
     void setTimeout(String transactionID, int time) {
-        getContext().system().scheduler().scheduleOnce(
+        timeouts.put(transactionID, getContext().system().scheduler().scheduleOnce(
                 Duration.create(time, TimeUnit.MILLISECONDS),
                 getSelf(),
                 new Timeout(transactionID), // the message to send
                 getContext().system().dispatcher(), getSelf()
-        );
+        ));
     }
 
     // fix the final decision of the current node
     void fixDecision(String transactionID, DSSDecision d) {
         if (!hasDecided(transactionID)) {
             this.decision.put(transactionID, d);
-            log("decided " + d);
+            log("fixed decision " + d);
         }
     }
 

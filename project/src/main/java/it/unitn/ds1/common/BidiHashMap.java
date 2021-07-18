@@ -17,6 +17,15 @@ public class BidiHashMap<T, U> extends HashMap<T, U> {
         return super.put(key, value);
     }
 
+    @Override
+    public U putIfAbsent(T key, U value) {
+       if (this.get(key) == null) {
+           return put(key, value);
+       } else {
+           return get(key);
+       }
+    }
+
     public T getKey(U value) {
         return reverseHashMap.get(value);
     }

@@ -63,25 +63,13 @@ public class Coordinator extends AbstractNode {
 
                 // COORDINATOR <- DSS
                 .match(DSSReadResultMsg.class, this::onDSSReadResult)
-                .match(Timeout.class, this::onTimeout)
+
                 .match(DSSVoteResponse.class, this::onVoteResponse)
 
-
-
-
-
-
-
-
-
-
-
-
-
-                .match(Recovery.class, this::onRecovery)
-
-
                 .match(DSSDecisionRequest.class, this::onDecisionRequest)
+
+                .match(Timeout.class, this::onTimeout)
+                .match(Recovery.class, this::onRecovery)
                 .build();
     }
 
@@ -94,12 +82,16 @@ public class Coordinator extends AbstractNode {
     /*-- Actor methods (for Client) -------------------------------------------------------- */
 
     private void onTxnBegin(TxnBeginMsg msg) {
+        log("received TxnBegin from " + msg.clientId);
         String transactionID = UUID.randomUUID().toString();
-        this.transactionMapping.putIfAbsent(getSender(), transactionID);
+        this.transactionMapping.put(getSender(), transactionID);
+        this.yesVotersMap.putIfAbsent(transactionID, new HashSet<>());
         getSender().tell(new TxnAcceptMsg(), getSelf());
+        log("assigned tID " + transactionID + " to Txn involving " + msg.clientId);
     }
 
     private void onTxnReadRequest(TxnReadRequestMsg msg) {
+        log("received TxnReadRequest from  " + msg.clientId + " and key " + msg.key);
         // Forwarding request to relevant DSS
         getCorrespondingDSS(msg.key).tell(        // get transactionID    // key     //
                 new DSSReadRequestMsg(transactionMapping.get(getSender()), msg.key), getSelf());
@@ -107,6 +99,7 @@ public class Coordinator extends AbstractNode {
     }
 
     private void onTxnWriteRequest(TxnWriteRequestMsg msg) {
+        log("received TxnWriteRequest from " + msg.clientId + ", key: " + msg.key + ", value: " + msg.value);
         // Forwarding request to relevant DSS
         getCorrespondingDSS(msg.key).tell(        // get transactionID    // key     //
                 new DSSWriteRequestMsg(transactionMapping.get(getSender()), msg.key, msg.value), getSelf());
@@ -124,16 +117,21 @@ public class Coordinator extends AbstractNode {
     /*-- Actor methods (for DSS) -------------------------------------------------------- */
 
     private void onDSSReadResult(DSSReadResultMsg msg) {
+        log("received DSSReadResult for tID " + msg.transactionID
+                + ": key " + msg.key + ", value: " + msg.value);
         // Get who asked for the value originally
         ActorRef destination = transactionMapping.getKey(msg.transactionID);
         // Tell client of <key, value>
         destination.tell(new TxnReadResultMsg(msg.key, msg.value), getSelf());
+        log("sent TxnReadResult");
+
     }
 
     /* -- 2PC methods (for DSS) ------------------ */
 
     @Override
     protected void onTimeout(Timeout msg) {
+        timeouts.remove(msg.transactionID);
         if (!hasDecided(msg.transactionID)) {
             log("Timeout. DSSDecision not taken, I'll just abort.");
             fixDecision(msg.transactionID, DSSDecision.ABORT);
@@ -145,46 +143,48 @@ public class Coordinator extends AbstractNode {
     }
 
     private void onVoteResponse(DSSVoteResponse msg) {
+        log("Received DSSVoteResponse with content v = "
+                + msg.vote + " total yes? " + yesVotersMap.get(msg.transactionID).size());
+
         if (hasDecided(msg.transactionID)) {
             // we have already decided and sent the decision to the group,
             // so do not care about other votes
             return;
         }
+
         DSSVote v = msg.vote;
         Set<ActorRef> transactionVoters = yesVotersMap.get(msg.transactionID);
+
         if (v == DSSVote.YES) {
             transactionVoters.add(getSender());
+
             if (allVotedYes(msg.transactionID)) {
+                timeouts.get(msg.transactionID).cancel();
                 fixDecision(msg.transactionID, DSSDecision.COMMIT);
+                yesVotersMap.remove(msg.transactionID);
                 //if (id==-1) {crash(3000); return;}
-                //multicastAndCrash(new DSSDecisionResponse(decision), 3000);
+                //multicastAndCrash(new DSSDecisionResponse(
+                  //      msg.transactionID, decision.get(msg.transactionID)), 4000);
                 multicast(new DSSDecisionResponse(msg.transactionID, decision.get(msg.transactionID)));
+            } else {
+                return; // nothing to do, we need to wait some more
             }
         } else { // a NO vote
             // on a single NO we decide ABORT
             fixDecision(msg.transactionID, DSSDecision.ABORT);
             multicast(new DSSDecisionResponse(msg.transactionID, decision.get(msg.transactionID)));
         }
+
+        ActorRef originalSender = transactionMapping.getKey(msg.transactionID);
+        originalSender.tell(new TxnResultMsg(v == DSSVote.YES), getSelf());
     }
-
-
-
-
-
-
-
-
-
-
-
-
 
     @Override
     protected void onRecovery(Recovery msg) {
         getContext().become(createReceive());
 
         for (String transactionID : transactionMapping.values()) {
-            log("---------" + hasDecided(transactionID) + " - " + decision);
+            log("Recovery. " + hasDecided(transactionID) + " - " + decision);
             if (!hasDecided(transactionID)) {
                 log("Recovery. Haven't decide, I'll just abort.");
                 fixDecision(transactionID, DSSDecision.ABORT);
