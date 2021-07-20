@@ -5,18 +5,19 @@ import akka.actor.ActorSystem;
 import it.unitn.ds1.project.message.ClientWelcomeMsg;
 import it.unitn.ds1.project.message.CoordinatorWelcomeMsg;
 import it.unitn.ds1.project.message.DSSWelcomeMsg;
+import it.unitn.ds1.project.message.dss.RequestSummaryMsg;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
 public class Init {
-    final static int N_CLIENTS = 3;
-    final static int N_COORDINATORS = 2;
+    final static int N_CLIENTS = 2;
+    final static int N_COORDINATORS = 3;
     final static int N_DATASTORE = 100;
     final static int MAX_KEYSTORE = N_DATASTORE * 10 - 1;
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws IOException {
 
         // Create the actor system
         final ActorSystem system = ActorSystem.create("project");
@@ -58,10 +59,25 @@ public class Init {
             clientGroup.get(j).tell(msg, ActorRef.noSender());
         }
 
-        try {
-            System.out.println(">>> Press ENTER to exit <<<");
+        while (true) {
+            System.out.flush();
+            System.out.println(">>> Press ENTER to verify consistency <<<");
             System.in.read();
-        } catch (IOException ignored) {
+
+            for (int j = 0; j < N_DATASTORE; j++) {
+                RequestSummaryMsg msg = new RequestSummaryMsg();
+                dataStoreGroup.get(j).tell(msg, ActorRef.noSender());
+            }
+
+            System.out.flush();
+            System.out.println(">>> Press ENTER to start <<<");
+            System.in.read();
+
+            for (int j = 0; j < N_CLIENTS; j++) {
+
+                ClientWelcomeMsg msg = new ClientWelcomeMsg(MAX_KEYSTORE, coordinatorGroup);
+                clientGroup.get(j).tell(msg, ActorRef.noSender());
+            }
         }
 
     }

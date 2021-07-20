@@ -16,7 +16,6 @@ import it.unitn.ds1.project.message.txn.read.TxnReadResultMsg;
 import it.unitn.ds1.project.message.txn.write.TxnWriteRequestMsg;
 import scala.concurrent.duration.Duration;
 
-import java.io.IOException;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
@@ -152,7 +151,6 @@ public class Client extends AbstractActor {
 
     private void onClientWelcome(ClientWelcomeMsg msg) {
         this.coordinators = msg.coordinators;
-        System.out.println(coordinators);
         this.maxKey = msg.maxKey;
         beginTxn();
     }

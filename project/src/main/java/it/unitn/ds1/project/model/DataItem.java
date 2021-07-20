@@ -5,6 +5,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class DataItem {
     private Integer value;
     private Integer version;
+    private boolean touched;
     private final AtomicBoolean locked = new AtomicBoolean(false);
 
     public DataItem(Integer value, Integer version) {
@@ -13,7 +14,8 @@ public class DataItem {
     }
 
     public DataItem(DataItem other) {
-        this.version = other.version + 1;
+        this.version = other.version;
+        this.touched = false;
         this.value = other.value;
     }
 
@@ -31,6 +33,13 @@ public class DataItem {
 
     public void setVersion(Integer version) {
         this.version = version;
+    }
+
+    public void incrementVersion() {
+        if (!touched) {
+            touched = true;
+            this.version++;
+        }
     }
 
     public boolean acquireLock() {

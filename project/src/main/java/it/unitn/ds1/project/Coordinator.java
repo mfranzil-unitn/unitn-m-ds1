@@ -143,8 +143,8 @@ public class Coordinator extends AbstractNode {
     }
 
     private void onVoteResponse(DSSVoteResponse msg) {
-        log("Received DSSVoteResponse with content v = "
-                + msg.vote + " total yes? " + yesVotersMap.get(msg.transactionID).size());
+        //log("Received DSSVoteResponse with content v = "
+        //        + msg.vote + " total yes? " + yesVotersMap.get(msg.transactionID).size());
 
         if (hasDecided(msg.transactionID)) {
             // we have already decided and sent the decision to the group,

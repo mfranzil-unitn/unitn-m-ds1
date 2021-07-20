@@ -5,6 +5,7 @@ import akka.actor.Props;
 import it.unitn.ds1.project.message.DSSWelcomeMsg;
 import it.unitn.ds1.project.message.dss.DSSMessage;
 import it.unitn.ds1.project.message.dss.Recovery;
+import it.unitn.ds1.project.message.dss.RequestSummaryMsg;
 import it.unitn.ds1.project.message.dss.Timeout;
 import it.unitn.ds1.project.message.dss.decision.DSSDecision;
 import it.unitn.ds1.project.message.dss.decision.DSSDecisionRequest;
@@ -37,7 +38,7 @@ public class DSS extends AbstractNode {
         super(id);
         this.r = new Random();
         for (int i = lowerBound; i < lowerBound + 10; i++) {
-         //   this.items.put(i, new DataItem(r.nextInt(), 1));
+            //   this.items.put(i, new DataItem(r.nextInt(), 1));
             this.items.put(i, new DataItem(100, 1));
         }
     }
@@ -63,6 +64,9 @@ public class DSS extends AbstractNode {
 
                 .match(Timeout.class, this::onTimeout)
                 .match(Recovery.class, this::onRecovery)
+
+                .match(RequestSummaryMsg.class, this::onRequestSummary)
+
                 .build();
     }
 
@@ -102,6 +106,7 @@ public class DSS extends AbstractNode {
         }
 
         currentPrivateWorkspace.get(msg.key).setValue(msg.value);
+        currentPrivateWorkspace.get(msg.key).incrementVersion();
 
         // No message is sent for writes
         //this.getSender().tell(new DSSWriteResultMsg(msg.transactionID), getSelf());
@@ -129,14 +134,16 @@ public class DSS extends AbstractNode {
         PrivateWorkspace currentPrivateWorkspace =
                 this.privateWorkspaces.getOrDefault(msg.transactionID, new PrivateWorkspace());
 
-         boolean commit = true;
+        boolean commit = true;
         // boolean commit = r.nextBoolean();
         List<DataItem> locked = new ArrayList<>();
 
         for (Map.Entry<Integer, DataItem> modifiedEntry : currentPrivateWorkspace.entrySet()) {
             DataItem originalDataItem = this.items.get(modifiedEntry.getKey());
+            // TODO
             if (originalDataItem.acquireLock()
-                    && originalDataItem.getVersion() == modifiedEntry.getValue().getVersion() - 1) {
+                    &&
+                    originalDataItem.getVersion() == modifiedEntry.getValue().getVersion() - 1) {
                 locked.add(originalDataItem);
             } else {
                 commit = false;
@@ -174,29 +181,52 @@ public class DSS extends AbstractNode {
     }
 
     private void onDecisionResponse(DSSDecisionResponse msg) {
-        if (msg.decision != null) {
-            timeouts.get(msg.transactionID).cancel();
-            switch (msg.decision) {
+        if (msg.decision == null) {
+            throw new RuntimeException(id + ": received empty DSSDecisionResponse from " + msg.transactionID);
+        }
 
-                case COMMIT:
-                    PrivateWorkspace privateWorkspace = this.privateWorkspaces.get(msg.transactionID);
+        timeouts.get(msg.transactionID).cancel();
+        PrivateWorkspace privateWorkspace = this.privateWorkspaces.get(msg.transactionID);
 
-                    if (privateWorkspace != null) {
-                        privateWorkspace.forEach((key, value) -> {
-                            this.items.get(key).setValue(value.getValue());
-                            this.items.get(key).setVersion(value.getVersion());
-                        });
-                    } else {
-                    }
-                case ABORT:
-                    this.coordinators.remove(msg.transactionID);
-                    this.lockedItems.getOrDefault(msg.transactionID, new ArrayList<>())
-                            .forEach(DataItem::releaseLock);
-                    this.privateWorkspaces.remove(msg.transactionID);
-
+        synchronized (System.out) {
+            if (privateWorkspace != null) {
+                System.out.print(id + " touched for " + msg.transactionID + " [");
+                privateWorkspace.forEach((k, v) -> {
+                    System.out.print("" + k + ", ");//+  ": " + v.getValue() + "], ");
+                });
+                System.out.println("]");
             }
         }
+
+        switch (msg.decision) {
+            case COMMIT:
+                if (privateWorkspace != null) {
+                    privateWorkspace.forEach((key, value) -> {
+                        this.items.get(key).setValue(value.getValue());
+                        this.items.get(key).setVersion(value.getVersion());
+                        this.items.get(key).releaseLock();
+                    });
+                }
+
+                break;
+            case ABORT:
+                this.lockedItems.getOrDefault(msg.transactionID, new ArrayList<>())
+                        .forEach(DataItem::releaseLock);
+                break;
+        }
+
+        this.privateWorkspaces.remove(msg.transactionID);
+        this.coordinators.remove(msg.transactionID);
         fixDecision(msg.transactionID, msg.decision);
+    }
+
+    public void onRequestSummary(RequestSummaryMsg msg) {
+        int sum = 0;
+        for (DataItem d : items.values()) {
+            sum += d.getValue();
+        }
+
+        log("sum: " + sum);
     }
 
     @Override
