@@ -118,7 +118,7 @@ public class Coordinator extends AbstractNode {
 
     private void onDSSReadResult(DSSReadResultMsg msg) {
         log("received DSSReadResult for tID " + msg.transactionID
-                + ": key " + msg.key + ", value: " + msg.value);
+              + ": key " + msg.key + ", value: " + msg.value);
         // Get who asked for the value originally
         ActorRef destination = transactionMapping.getKey(msg.transactionID);
         // Tell client of <key, value>
@@ -198,7 +198,7 @@ public class Coordinator extends AbstractNode {
     @Override
     protected void crash(int recoverIn) {
         getContext().become(crashed());
-        log("CRASH!!!");
+        //log("CRASH!!!");
 
         // setting a timer to "recover"
         getContext().system().scheduler().scheduleOnce(

@@ -209,6 +209,7 @@ public class Client extends AbstractActor {
             log("COMMIT FAIL (" + (numAttemptedTxn - numCommittedTxn) + "/" + numAttemptedTxn + ")");
         }
 
+        /*
         try {
             System.out.println(">>> Press ENTER to continue <<<");
             System.in.read();
@@ -216,7 +217,9 @@ public class Client extends AbstractActor {
             e.printStackTrace();
         }
 
-        beginTxn();
+        */
+
+        //beginTxn();
     }
 
     void log(String s) {

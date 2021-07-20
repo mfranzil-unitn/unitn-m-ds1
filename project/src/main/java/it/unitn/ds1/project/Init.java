@@ -11,10 +11,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class Init {
-    final static int N_CLIENTS = 1;
+    final static int N_CLIENTS = 3;
     final static int N_COORDINATORS = 2;
-    final static int MAX_KEYSTORE = 99;
-    final static int N_DATASTORE = (MAX_KEYSTORE - 9) / 10;
+    final static int N_DATASTORE = 100;
+    final static int MAX_KEYSTORE = N_DATASTORE * 10 - 1;
 
     public static void main(String[] args) {
 
@@ -34,7 +34,7 @@ public class Init {
         }
 
         List<ActorRef> dataStoreGroup = new ArrayList<>();
-        for (int i = 1000; i - 1000 <= N_DATASTORE; i++) {
+        for (int i = 1000; i - 1000 < N_DATASTORE; i++) {
             int lowerBound = (i - 1000) * 10;
             System.out.println("Generating Datastore actor with ID " + i + " and lower bound " + lowerBound);
             dataStoreGroup.add(system.actorOf(DSS.props(i, lowerBound)));

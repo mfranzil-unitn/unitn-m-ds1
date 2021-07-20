@@ -115,6 +115,7 @@ public class DSS extends AbstractNode {
 
         if (currentPrivateWorkspace == null) {
             currentPrivateWorkspace = new PrivateWorkspace();
+            this.privateWorkspaces.put(transactionID, currentPrivateWorkspace);
         }
 
         return currentPrivateWorkspace;
@@ -145,10 +146,10 @@ public class DSS extends AbstractNode {
             this.lockedItems.put(msg.transactionID, locked);
             this.getSelf().tell(new DSSDecisionResponse(msg.transactionID, DSSDecision.ABORT), getSelf());
             votes.put(msg.transactionID, DSSVote.NO);
-            log("sending vote ABORT");
+            log("sending vote NO");
         } else {
             votes.put(msg.transactionID, DSSVote.YES);
-            log("sending vote COMMIT");
+            log("sending vote YES");
         }
 
         this.getSender().tell(new DSSVoteResponse(msg.transactionID, votes.get(msg.transactionID)), getSelf());
@@ -176,6 +177,7 @@ public class DSS extends AbstractNode {
         if (msg.decision != null) {
             timeouts.get(msg.transactionID).cancel();
             switch (msg.decision) {
+
                 case COMMIT:
                     PrivateWorkspace privateWorkspace = this.privateWorkspaces.get(msg.transactionID);
 
@@ -184,12 +186,12 @@ public class DSS extends AbstractNode {
                             this.items.get(key).setValue(value.getValue());
                             this.items.get(key).setVersion(value.getVersion());
                         });
+                    } else {
                     }
                 case ABORT:
                     this.coordinators.remove(msg.transactionID);
                     this.lockedItems.getOrDefault(msg.transactionID, new ArrayList<>())
                             .forEach(DataItem::releaseLock);
-                    this.lockedItems.remove(msg.transactionID);
                     this.privateWorkspaces.remove(msg.transactionID);
 
             }
