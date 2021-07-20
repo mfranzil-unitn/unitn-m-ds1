@@ -86,6 +86,7 @@ public class Coordinator extends AbstractNode {
         String transactionID = UUID.randomUUID().toString();
         this.transactionMapping.put(getSender(), transactionID);
         this.yesVotersMap.putIfAbsent(transactionID, new HashSet<>());
+        delay(r.nextInt(MAX_DELAY));
         getSender().tell(new TxnAcceptMsg(), getSelf());
         log("assigned tID " + transactionID + " to Txn involving " + msg.clientId);
     }
@@ -93,6 +94,7 @@ public class Coordinator extends AbstractNode {
     private void onTxnReadRequest(TxnReadRequestMsg msg) {
         log("received TxnReadRequest from  " + msg.clientId + " and key " + msg.key);
         // Forwarding request to relevant DSS
+        delay(r.nextInt(MAX_DELAY));
         getCorrespondingDSS(msg.key).tell(        // get transactionID    // key     //
                 new DSSReadRequestMsg(transactionMapping.get(getSender()), msg.key), getSelf());
         // No response
@@ -101,6 +103,7 @@ public class Coordinator extends AbstractNode {
     private void onTxnWriteRequest(TxnWriteRequestMsg msg) {
         log("received TxnWriteRequest from " + msg.clientId + ", key: " + msg.key + ", value: " + msg.value);
         // Forwarding request to relevant DSS
+        delay(r.nextInt(MAX_DELAY));
         getCorrespondingDSS(msg.key).tell(        // get transactionID    // key     //
                 new DSSWriteRequestMsg(transactionMapping.get(getSender()), msg.key, msg.value), getSelf());
     }
@@ -122,6 +125,7 @@ public class Coordinator extends AbstractNode {
         // Get who asked for the value originally
         ActorRef destination = transactionMapping.getKey(msg.transactionID);
         // Tell client of <key, value>
+        delay(r.nextInt(MAX_DELAY));
         destination.tell(new TxnReadResultMsg(msg.key, msg.value), getSelf());
         log("sent TxnReadResult");
 
@@ -138,6 +142,7 @@ public class Coordinator extends AbstractNode {
             multicast(new DSSDecisionResponse(msg.transactionID, decision.get(msg.transactionID)));
             // Inform client of sad decision
             ActorRef destination = transactionMapping.getKey(msg.transactionID);
+            delay(r.nextInt(MAX_DELAY));
             destination.tell(new TxnResultMsg(false), getSelf());
         }
     }
@@ -176,6 +181,7 @@ public class Coordinator extends AbstractNode {
         }
 
         ActorRef originalSender = transactionMapping.getKey(msg.transactionID);
+        delay(r.nextInt(MAX_DELAY));
         originalSender.tell(new TxnResultMsg(v == DSSVote.YES), getSelf());
     }
 

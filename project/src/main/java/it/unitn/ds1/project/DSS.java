@@ -32,11 +32,9 @@ public class DSS extends AbstractNode {
     private final List<ActorRef> dataStores = new ArrayList<>();
     private final Map<String, DSSVote> votes = new HashMap<>();
 
-    private final Random r;
 
     public DSS(int id, int lowerBound) {
         super(id);
-        this.r = new Random();
         for (int i = lowerBound; i < lowerBound + 10; i++) {
             //   this.items.put(i, new DataItem(r.nextInt(), 1));
             this.items.put(i, new DataItem(100, 1));
@@ -91,6 +89,7 @@ public class DSS extends AbstractNode {
         DSSReadResultMsg responseMsg = new DSSReadResultMsg(msg.transactionID, msg.key, copiedItem.getValue());
 
         ActorRef sender = getSender();
+        delay(r.nextInt(MAX_DELAY));
         sender.tell(responseMsg, this.getSelf());
         log("sent DSSReadResponse");
     }
@@ -141,9 +140,16 @@ public class DSS extends AbstractNode {
         for (Map.Entry<Integer, DataItem> modifiedEntry : currentPrivateWorkspace.entrySet()) {
             DataItem originalDataItem = this.items.get(modifiedEntry.getKey());
             // TODO
-            if (originalDataItem.acquireLock()
-                    &&
-                    originalDataItem.getVersion() == modifiedEntry.getValue().getVersion() - 1) {
+            if (originalDataItem.acquireLock() && (
+                    (
+                            originalDataItem.getVersion().equals(modifiedEntry.getValue().getVersion() - 1)
+                                    ||
+                                    originalDataItem.getVersion().equals(modifiedEntry.getValue().getVersion())
+                    )
+
+            )
+            )
+            {
                 locked.add(originalDataItem);
             } else {
                 commit = false;
@@ -151,6 +157,7 @@ public class DSS extends AbstractNode {
         }
         if (!commit) {
             this.lockedItems.put(msg.transactionID, locked);
+            delay(r.nextInt(MAX_DELAY));
             this.getSelf().tell(new DSSDecisionResponse(msg.transactionID, DSSDecision.ABORT), getSelf());
             votes.put(msg.transactionID, DSSVote.NO);
             log("sending vote NO");
@@ -159,6 +166,7 @@ public class DSS extends AbstractNode {
             log("sending vote YES");
         }
 
+        delay(r.nextInt(MAX_DELAY));
         this.getSender().tell(new DSSVoteResponse(msg.transactionID, votes.get(msg.transactionID)), getSelf());
         setTimeout(msg.transactionID, DECISION_TIMEOUT);
 
@@ -232,7 +240,6 @@ public class DSS extends AbstractNode {
     @Override
     protected void onTimeout(Timeout msg) {
         timeouts.remove(msg.transactionID);
-
         // we assume that vote request arrives sooner or later so no forced abort
         log("timeout: I have decided " + hasDecided(msg.transactionID) + " - " + votes.get(msg.transactionID));
         if (!hasDecided(msg.transactionID)) {
@@ -253,6 +260,7 @@ public class DSS extends AbstractNode {
                 log("Recovery. Asking the coordinator.");
                 coordinators.keySet().forEach(key -> {
                     ActorRef actor = coordinators.get(key);
+                    delay(r.nextInt(MAX_DELAY));
                     actor.tell(new DSSDecisionRequest(transactionID), getSelf());
                     setTimeout(transactionID, DECISION_TIMEOUT);
                 });

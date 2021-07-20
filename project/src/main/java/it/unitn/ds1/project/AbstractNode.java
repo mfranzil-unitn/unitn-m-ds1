@@ -12,21 +12,42 @@ import scala.concurrent.duration.Duration;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
 public abstract class AbstractNode extends AbstractActor {
     final static int VOTE_TIMEOUT = 5000;      // timeout for the votes, ms
     final static int DECISION_TIMEOUT = 5000;  // timeout for the decision, ms
 
+    final static int MAX_DELAY = 100;
+
     protected int id;                           // node ID
 
-    protected Map<String, DSSDecision> decision = null;
+    protected final Random r;
+
+    protected Map<String, DSSDecision> decision;
     protected Map<String, Cancellable> timeouts;
 
     protected AbstractNode(int id) {
         this.id = id;
         this.decision = new HashMap<>();
         this.timeouts = new HashMap<>();
+        this.r = new Random();
+
+    }
+
+    @Override
+    public Receive createReceive() {
+        // Empty mapping: we'll define it in the inherited classes
+        return receiveBuilder().build();
+    }
+
+    public Receive crashed() {
+        return receiveBuilder()
+                .match(Recovery.class, this::onRecovery)
+                .matchAny(msg -> {
+                })
+                .build();
     }
 
     // abstract methods to be implemented in extending classes
@@ -38,6 +59,7 @@ public abstract class AbstractNode extends AbstractActor {
     // multicast
     protected abstract void multicast(DSSMessage m);
     protected abstract void multicastAndCrash(DSSMessage m, int recoverIn);
+
 
     // schedule a Timeout message in specified time
     void setTimeout(String transactionID, int time) {
@@ -61,20 +83,6 @@ public abstract class AbstractNode extends AbstractActor {
         return decision.get(transactionID) != null;
     } // has the node decided?
 
-    @Override
-    public Receive createReceive() {
-        // Empty mapping: we'll define it in the inherited classes
-        return receiveBuilder().build();
-    }
-
-    public Receive crashed() {
-        return receiveBuilder()
-                .match(Recovery.class, this::onRecovery)
-                .matchAny(msg -> {
-                })
-                .build();
-    }
-
     public void onDecisionRequest(DSSDecisionRequest msg) {  /* DSSDecision Request */
         if (hasDecided(msg.transactionID)) {
             getSender().tell(new DSSDecisionResponse(msg.transactionID, decision.get(msg.transactionID)), getSelf());
@@ -91,7 +99,8 @@ public abstract class AbstractNode extends AbstractActor {
     void delay(int d) {
         try {
             Thread.sleep(d);
-        } catch (Exception ignored) {
+        } catch (InterruptedException e) {
+            e.printStackTrace();
         }
     }
 
