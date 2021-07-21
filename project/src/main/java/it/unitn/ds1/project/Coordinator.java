@@ -110,8 +110,28 @@ public class Coordinator extends AbstractNode {
         // on txnend the client is blocked until the coordinator has a ABORT/COMMIT decision
         // we need to start the logic for initiating the 2pc
         String transactionID = transactionMapping.get(getSender());
-        multicast(new DSSVoteRequest(transactionID));
+
+
+        if (Init.CRASH_COORDINATOR_AFTER_ONE_VOTE_REQUEST
+                && !Init.CRASH_COORDINATOR_AFTER_ALL_VOTE_REQUEST) {
+            multicastAndCrash(new DSSVoteRequest(transactionID), CRASH_TIME);
+        } else if (
+                (!Init.CRASH_COORDINATOR_AFTER_ONE_VOTE_REQUEST
+                        && Init.CRASH_COORDINATOR_AFTER_ALL_VOTE_REQUEST) ||
+                        (Init.CRASH_COORDINATOR_AFTER_ONE_VOTE_REQUEST
+                                && Init.CRASH_COORDINATOR_AFTER_ALL_VOTE_REQUEST)
+        ) {
+            multicast(new DSSVoteRequest(transactionID));
+            crash(CRASH_TIME);
+        } else {
+            multicast(new DSSVoteRequest(transactionID));
+        }
+
         setTimeout(transactionID, VOTE_TIMEOUT);
+
+        if (Init.CRASH_COORDINATOR_BEFORE_DECISION_RESPONSE) {
+            crash(CRASH_TIME);
+        }
     }
 
 
@@ -119,7 +139,7 @@ public class Coordinator extends AbstractNode {
 
     private void onDSSReadResult(DSSReadResultMsg msg) {
         log("received DSSReadResult for tID " + msg.transactionID
-              + ": key " + msg.key + ", value: " + msg.value);
+                + ": key " + msg.key + ", value: " + msg.value);
         // Get who asked for the value originally
         ActorRef destination = transactionMapping.getKey(msg.transactionID);
         // Tell client of <key, value>
@@ -137,7 +157,10 @@ public class Coordinator extends AbstractNode {
         if (!hasDecided(msg.transactionID)) {
             log("Timeout. DSSDecision not taken, I'll just abort.");
             fixDecision(msg.transactionID, DSSDecision.ABORT);
+
+            // crashyDecisionResponse(msg.transactionID);
             multicast(new DSSDecisionResponse(msg.transactionID, decision.get(msg.transactionID)));
+
             // Inform client of sad decision
             ActorRef destination = transactionMapping.getKey(msg.transactionID);
             delay(r.nextInt(MAX_DELAY));
@@ -165,10 +188,8 @@ public class Coordinator extends AbstractNode {
                 timeouts.get(msg.transactionID).cancel();
                 fixDecision(msg.transactionID, DSSDecision.COMMIT);
                 yesVotersMap.remove(msg.transactionID);
-                //if (id==-1) {crash(3000); return;}
-                //multicastAndCrash(new DSSDecisionResponse(
-                  //      msg.transactionID, decision.get(msg.transactionID)), 4000);
-                multicast(new DSSDecisionResponse(msg.transactionID, decision.get(msg.transactionID)));
+
+                crashyDecisionResponse(msg.transactionID);
             } else {
                 return; // nothing to do, we need to wait some more
             }
@@ -180,24 +201,45 @@ public class Coordinator extends AbstractNode {
 
         ActorRef originalSender = transactionMapping.getKey(msg.transactionID);
         delay(r.nextInt(MAX_DELAY));
-        originalSender.tell(new TxnResultMsg(v == DSSVote.YES), getSelf());
+        originalSender.tell(new TxnResultMsg(decision.get(msg.transactionID) == DSSDecision.COMMIT),
+                getSelf());
+    }
+
+    private void crashyDecisionResponse(String transactionID) {
+        if (Init.CRASH_COORDINATOR_AFTER_ONE_DECISION_RESPONSE
+                && !Init.CRASH_COORDINATOR_AFTER_ALL_DECISION_RESPONSE) {
+            multicastAndCrash(new DSSDecisionResponse(transactionID, decision.get(transactionID)),
+                    CRASH_TIME);
+        } else if (
+                (!Init.CRASH_COORDINATOR_AFTER_ONE_DECISION_RESPONSE
+                        && Init.CRASH_COORDINATOR_AFTER_ALL_DECISION_RESPONSE) ||
+                        (Init.CRASH_COORDINATOR_AFTER_ONE_DECISION_RESPONSE
+                                && Init.CRASH_COORDINATOR_AFTER_ALL_DECISION_RESPONSE)
+        ) {
+            multicast(new DSSDecisionResponse(transactionID, decision.get(transactionID)));
+            crash(CRASH_TIME);
+        } else {
+            multicast(new DSSDecisionResponse(transactionID, decision.get(transactionID)));
+        }
     }
 
     @Override
     protected void onRecovery(Recovery msg) {
         getContext().become(createReceive());
 
-        for (String transactionID : transactionMapping.values()) {
+        transactionMapping.forEach((client, transactionID) -> {
             log("Recovery. " + hasDecided(transactionID) + " - " + decision);
             if (!hasDecided(transactionID)) {
                 log("Recovery. Haven't decide, I'll just abort.");
                 fixDecision(transactionID, DSSDecision.ABORT);
             }
 
+            // crashyDecisionResponse(msg.transactionID);
             multicast(new DSSDecisionResponse(transactionID, decision.get(transactionID)));
-        }
 
-        // TODO avvisare i client
+            client.tell(new TxnResultMsg(decision.get(transactionID) == DSSDecision.COMMIT),
+                    getSelf());
+        });
     }
 
 

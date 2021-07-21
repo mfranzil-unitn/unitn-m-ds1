@@ -19,6 +19,8 @@ public abstract class AbstractNode extends AbstractActor {
     final static int VOTE_TIMEOUT = 5000;      // timeout for the votes, ms
     final static int DECISION_TIMEOUT = 5000;  // timeout for the decision, ms
 
+    final static int CRASH_TIME = 7000;
+
     final static int MAX_DELAY = 100;
 
     protected int id;                           // node ID

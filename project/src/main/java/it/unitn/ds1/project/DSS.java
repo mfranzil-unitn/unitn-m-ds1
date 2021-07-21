@@ -3,7 +3,10 @@ package it.unitn.ds1.project;
 import akka.actor.ActorRef;
 import akka.actor.Props;
 import it.unitn.ds1.project.message.DSSWelcomeMsg;
-import it.unitn.ds1.project.message.dss.*;
+import it.unitn.ds1.project.message.dss.DSSMessage;
+import it.unitn.ds1.project.message.dss.Recovery;
+import it.unitn.ds1.project.message.dss.RequestSummaryMsg;
+import it.unitn.ds1.project.message.dss.Timeout;
 import it.unitn.ds1.project.message.dss.decision.DSSDecision;
 import it.unitn.ds1.project.message.dss.decision.DSSDecisionRequest;
 import it.unitn.ds1.project.message.dss.decision.DSSDecisionResponse;
@@ -16,7 +19,10 @@ import it.unitn.ds1.project.message.dss.write.DSSWriteRequestMsg;
 import it.unitn.ds1.project.model.DataItem;
 import it.unitn.ds1.project.model.PrivateWorkspace;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 /*-- The data store -----------------------------------------------------------*/
 public class DSS extends AbstractNode {
@@ -24,7 +30,6 @@ public class DSS extends AbstractNode {
     private final Map<Integer, DataItem> items = new HashMap<>();
     private final Map<String, PrivateWorkspace> privateWorkspaces = new HashMap<>();
     private final Map<String, List<DataItem>> lockedItems = new HashMap<>();
-
 
     private Map<String, ActorRef> coordinators = new HashMap<>();
     private final List<ActorRef> dataStores = new ArrayList<>();
@@ -130,13 +135,23 @@ public class DSS extends AbstractNode {
 
     public void onVoteRequest(DSSVoteRequest msg) {
         log("Received VoteRequest for tID " + msg.transactionID);
-        if( !this.hasVoted(msg.transactionID) ) {
+        if (!this.hasVoted(msg.transactionID)) {
             this.checkConsistency(msg);
         }
+
+        if (Init.CRASH_DSS_BEFORE_VOTE_RESPONSE) {
+            crash(CRASH_TIME);
+            return;
+        }
+
         delay(r.nextInt(MAX_DELAY));
         this.getSender().tell(new DSSVoteResponse(msg.transactionID, votes.get(msg.transactionID)), getSelf());
         setTimeout(msg.transactionID, DECISION_TIMEOUT);
 
+        if (Init.CRASH_DSS_BEFORE_DECISION_RESPONSE) {
+            crash(CRASH_TIME);
+            return;
+        }
     }
 
     private void onDecisionResponse(DSSDecisionResponse msg) {
@@ -204,6 +219,10 @@ public class DSS extends AbstractNode {
             if (votes.get(msg.transactionID) == DSSVote.YES) {
                 log("Timeout. Asking around.");
                 multicast(new DSSVoteRequest(msg.transactionID));
+
+                // If nobody responds to the timeout (e.g. if the coordinator crashed when everyone was in ready
+                // state and someone received a voteRequest, then the transaction will be aborted as soon as
+                // the next voteRequest arrives
             }
         }
     }
