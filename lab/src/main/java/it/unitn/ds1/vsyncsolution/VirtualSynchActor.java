@@ -241,7 +241,7 @@ public class VirtualSynchActor extends AbstractActor {
             membersSeqno.put(m.sender, m.seqno);
             System.out.println(
                     getSelf().path().name() + " delivers " + m.seqno
-                            + " from " + m.sender.path().name() + " in view " + (deferred ? m.viewId : this.viewId) // TODO
+                            + " from " + m.sender.path().name() + " in view " + (deferred ? m.viewId : this.viewId)
                             + (deferred ? " (deferred)" : "")
             );
         }

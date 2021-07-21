@@ -139,17 +139,9 @@ public class DSS extends AbstractNode {
 
         for (Map.Entry<Integer, DataItem> modifiedEntry : currentPrivateWorkspace.entrySet()) {
             DataItem originalDataItem = this.items.get(modifiedEntry.getKey());
-            // TODO
-            if (originalDataItem.acquireLock() && (
-                    (
-                            originalDataItem.getVersion().equals(modifiedEntry.getValue().getVersion() - 1)
-                                    ||
-                                    originalDataItem.getVersion().equals(modifiedEntry.getValue().getVersion())
-                    )
-
-            )
-            )
-            {
+            if (originalDataItem.acquireLock()
+                    && ((originalDataItem.getVersion().equals(modifiedEntry.getValue().getVersion() - 1)
+                    || originalDataItem.getVersion().equals(modifiedEntry.getValue().getVersion())))) {
                 locked.add(originalDataItem);
             } else {
                 commit = false;
@@ -266,11 +258,6 @@ public class DSS extends AbstractNode {
                 });
             }
         }
-    }
-
-    @Override
-    protected void crash(int recoverIn) {
-        // TODO make method for crashing
     }
 
     @Override

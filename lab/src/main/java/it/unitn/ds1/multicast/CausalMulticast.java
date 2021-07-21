@@ -59,8 +59,6 @@ public class CausalMulticast {
                 it.unitn.ds1.multicast.Chatter.props(id++, "d"), // this one will catch up with the topic "b"
                 "chatter7"));
 
-        // TODO 1: create additional actors in a different conversation
-
         // the rest are silent listeners: they have no topics to discuss
         for (int i = 0; i < N_LISTENERS; i++) {
             group.add(system.actorOf(
@@ -94,6 +92,7 @@ public class CausalMulticast {
             System.out.println(">>> Press ENTER to exit <<<");
             System.in.read();
         } catch (IOException ioe) {
+            ioe.printStackTrace();
         }
         system.terminate();
     }

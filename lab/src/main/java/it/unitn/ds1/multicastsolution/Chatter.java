@@ -21,8 +21,6 @@ class Chatter extends AbstractActor {
     // a buffer storing all received chat messages
     private final StringBuffer chatHistory = new StringBuffer();
 
-    // TODO 2: provide a buffer for out-of-order messages
-
     // message queue to hold out-of-order messages
     private final List<ChatMsg> mq = new ArrayList<>();
 
@@ -53,7 +51,7 @@ class Chatter extends AbstractActor {
             this.n = n;
             this.senderId = senderId;
             this.vc = new int[vc.length];
-            for (int i = 0; i < vc.length; i++) this.vc[i] = vc[i];
+            System.arraycopy(vc, 0, this.vc, 0, vc.length);
         }
     }
 
@@ -75,8 +73,6 @@ class Chatter extends AbstractActor {
     /* -- Actor behaviour ----------------------------------------------------- */
     private void sendChatMsg(String topic, int n) {
         sendCount++;
-
-        // TODO 3: update vector clock
 
         // increase vector clock value assigned to this actor
         this.vc[id]++;
@@ -149,9 +145,6 @@ class Chatter extends AbstractActor {
 
     private void onChatMsg(ChatMsg msg) {
 
-        // TODO 4: deliver only if the message is in-order
-        // TODO 4 hint: once a message is delivered, update the vector clock...
-
         // check if message can be delivered (i.e., it is in-order)
         if (canDeliver(msg)) {
             while (msg != null) {
@@ -201,7 +194,7 @@ class Chatter extends AbstractActor {
 
     private void updateLocalClock(ChatMsg m) {
         for (int i = 0; i < vc.length; i++)
-            vc[i] = (m.vc[i] > vc[i]) ? m.vc[i] : vc[i];
+            vc[i] = Math.max(m.vc[i], vc[i]);
     }
 
     private void deliver(ChatMsg m) {

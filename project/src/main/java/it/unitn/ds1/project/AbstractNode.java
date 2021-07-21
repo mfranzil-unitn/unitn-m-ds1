@@ -42,7 +42,7 @@ public abstract class AbstractNode extends AbstractActor {
         return receiveBuilder().build();
     }
 
-    public Receive crashed() {
+    protected Receive crashed() {
         return receiveBuilder()
                 .match(Recovery.class, this::onRecovery)
                 .matchAny(msg -> {
@@ -54,7 +54,19 @@ public abstract class AbstractNode extends AbstractActor {
 
     protected abstract void onRecovery(Recovery msg);
     protected abstract void onTimeout(Timeout msg);
-    protected abstract void crash(int recoverIn);
+
+    protected void crash(int recoverIn) {
+        getContext().become(crashed());
+        log(" [CRASHED]");
+
+        // setting a timer to "recover"
+        getContext().system().scheduler().scheduleOnce(
+                Duration.create(recoverIn, TimeUnit.MILLISECONDS),
+                getSelf(),
+                new Recovery(), // message sent to myself
+                getContext().system().dispatcher(), getSelf()
+        );
+    }
 
     // multicast
     protected abstract void multicast(DSSMessage m);
@@ -62,7 +74,7 @@ public abstract class AbstractNode extends AbstractActor {
 
 
     // schedule a Timeout message in specified time
-    void setTimeout(String transactionID, int time) {
+    protected void setTimeout(String transactionID, int time) {
         timeouts.put(transactionID, getContext().system().scheduler().scheduleOnce(
                 Duration.create(time, TimeUnit.MILLISECONDS),
                 getSelf(),
@@ -72,18 +84,18 @@ public abstract class AbstractNode extends AbstractActor {
     }
 
     // fix the final decision of the current node
-    void fixDecision(String transactionID, DSSDecision d) {
+    protected void fixDecision(String transactionID, DSSDecision d) {
         if (!hasDecided(transactionID)) {
             this.decision.put(transactionID, d);
             log("fixed decision " + d);
         }
     }
 
-    boolean hasDecided(String transactionID) {
+    protected boolean hasDecided(String transactionID) {
         return decision.get(transactionID) != null;
     } // has the node decided?
 
-    public void onDecisionRequest(DSSDecisionRequest msg) {  /* DSSDecision Request */
+    protected void onDecisionRequest(DSSDecisionRequest msg) {  /* DSSDecision Request */
         if (hasDecided(msg.transactionID)) {
             getSender().tell(new DSSDecisionResponse(msg.transactionID, decision.get(msg.transactionID)), getSelf());
         }
@@ -92,11 +104,11 @@ public abstract class AbstractNode extends AbstractActor {
 
     /* -- Auxiliary ---------------------- */
 
-    void log(String s) {
+    protected void log(String s) {
         System.out.format("%2d: %s\n", id, s);
     }
 
-    void delay(int d) {
+    protected void delay(int d) {
         try {
             Thread.sleep(d);
         } catch (InterruptedException e) {

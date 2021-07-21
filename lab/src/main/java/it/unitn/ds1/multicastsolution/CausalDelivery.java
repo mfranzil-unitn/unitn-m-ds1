@@ -27,8 +27,6 @@ public class CausalDelivery {
                 Chatter.props(id++, "a"), // this one will catch up the topic "a"
                 "chatter1"));
 
-        // TODO 1: create additional actors in a different conversation
-
         group.add(system.actorOf(
                 Chatter.props(id++, "."),  // this one will start the topic "a"
                 "chatter2"));
@@ -65,6 +63,7 @@ public class CausalDelivery {
             System.out.println(">>> Press ENTER to exit <<<");
             System.in.read();
         } catch (IOException ioe) {
+            ioe.printStackTrace();
         }
         system.terminate();
     }

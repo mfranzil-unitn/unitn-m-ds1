@@ -23,10 +23,8 @@ import it.unitn.ds1.project.message.txn.end.TxnResultMsg;
 import it.unitn.ds1.project.message.txn.read.TxnReadRequestMsg;
 import it.unitn.ds1.project.message.txn.read.TxnReadResultMsg;
 import it.unitn.ds1.project.message.txn.write.TxnWriteRequestMsg;
-import scala.concurrent.duration.Duration;
 
 import java.util.*;
-import java.util.concurrent.TimeUnit;
 
 public class Coordinator extends AbstractNode {
 
@@ -198,22 +196,10 @@ public class Coordinator extends AbstractNode {
 
             multicast(new DSSDecisionResponse(transactionID, decision.get(transactionID)));
         }
-        // TODO inform client of decision too
+
+        // TODO avvisare i client
     }
 
-    @Override
-    protected void crash(int recoverIn) {
-        getContext().become(crashed());
-        //log("CRASH!!!");
-
-        // setting a timer to "recover"
-        getContext().system().scheduler().scheduleOnce(
-                Duration.create(recoverIn, TimeUnit.MILLISECONDS),
-                getSelf(),
-                new Recovery(), // message sent to myself
-                getContext().system().dispatcher(), getSelf()
-        );
-    }
 
     @Override
     protected void multicast(DSSMessage m) {
