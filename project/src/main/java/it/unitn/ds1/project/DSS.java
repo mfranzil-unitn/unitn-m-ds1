@@ -3,10 +3,7 @@ package it.unitn.ds1.project;
 import akka.actor.ActorRef;
 import akka.actor.Props;
 import it.unitn.ds1.project.message.DSSWelcomeMsg;
-import it.unitn.ds1.project.message.dss.DSSMessage;
-import it.unitn.ds1.project.message.dss.Recovery;
-import it.unitn.ds1.project.message.dss.RequestSummaryMsg;
-import it.unitn.ds1.project.message.dss.Timeout;
+import it.unitn.ds1.project.message.dss.*;
 import it.unitn.ds1.project.message.dss.decision.DSSDecision;
 import it.unitn.ds1.project.message.dss.decision.DSSDecisionRequest;
 import it.unitn.ds1.project.message.dss.decision.DSSDecisionResponse;
@@ -27,6 +24,7 @@ public class DSS extends AbstractNode {
     private final Map<Integer, DataItem> items = new HashMap<>();
     private final Map<String, PrivateWorkspace> privateWorkspaces = new HashMap<>();
     private final Map<String, List<DataItem>> lockedItems = new HashMap<>();
+
 
     private Map<String, ActorRef> coordinators = new HashMap<>();
     private final List<ActorRef> dataStores = new ArrayList<>();
@@ -62,6 +60,9 @@ public class DSS extends AbstractNode {
 
                 .match(Timeout.class, this::onTimeout)
                 .match(Recovery.class, this::onRecovery)
+
+                // DSS -> DSS
+                .match(DSSVoteResponse.class, this::onVoteResponse)
 
                 .match(RequestSummaryMsg.class, this::onRequestSummary)
 
@@ -129,55 +130,13 @@ public class DSS extends AbstractNode {
 
     public void onVoteRequest(DSSVoteRequest msg) {
         log("Received VoteRequest for tID " + msg.transactionID);
-
-        PrivateWorkspace currentPrivateWorkspace =
-                this.privateWorkspaces.getOrDefault(msg.transactionID, new PrivateWorkspace());
-
-        boolean commit = true;
-        // boolean commit = r.nextBoolean();
-        List<DataItem> locked = new ArrayList<>();
-
-        for (Map.Entry<Integer, DataItem> modifiedEntry : currentPrivateWorkspace.entrySet()) {
-            DataItem originalDataItem = this.items.get(modifiedEntry.getKey());
-            if (originalDataItem.acquireLock()
-                    && ((originalDataItem.getVersion().equals(modifiedEntry.getValue().getVersion() - 1)
-                    || originalDataItem.getVersion().equals(modifiedEntry.getValue().getVersion())))) {
-                locked.add(originalDataItem);
-            } else {
-                commit = false;
-            }
+        if( !this.hasVoted(msg.transactionID) ) {
+            this.checkConsistency(msg);
         }
-        if (!commit) {
-            this.lockedItems.put(msg.transactionID, locked);
-            delay(r.nextInt(MAX_DELAY));
-            this.getSelf().tell(new DSSDecisionResponse(msg.transactionID, DSSDecision.ABORT), getSelf());
-            votes.put(msg.transactionID, DSSVote.NO);
-            log("sending vote NO");
-        } else {
-            votes.put(msg.transactionID, DSSVote.YES);
-            log("sending vote YES");
-        }
-
         delay(r.nextInt(MAX_DELAY));
         this.getSender().tell(new DSSVoteResponse(msg.transactionID, votes.get(msg.transactionID)), getSelf());
         setTimeout(msg.transactionID, DECISION_TIMEOUT);
 
-        /*if (id == 0) {
-            crash(10000);
-            return;
-        }    // simulate a crash
-        if (id == 1) {
-            crash(10000);
-            return;
-        }    // simulate a crash
-        if (id == 2) delay(4000);              // simulate a delay
-        */
-        /*
-        vote = r.nextDouble() < COMMIT_PROBABILITY ? DSSVote.YES : DSSVote.NO;
-        if (vote == DSSVote.NO) {
-            fixDecision(DSSDecision.ABORT);
-        }
-        */
     }
 
     private void onDecisionResponse(DSSDecisionResponse msg) {
@@ -220,6 +179,13 @@ public class DSS extends AbstractNode {
         fixDecision(msg.transactionID, msg.decision);
     }
 
+
+    private void onVoteResponse(DSSVoteResponse msg){
+
+        if( msg.vote.equals(DSSVote.NO) )
+            multicast(new DSSDecisionResponse(msg.transactionID, DSSDecision.ABORT));
+    }
+
     public void onRequestSummary(RequestSummaryMsg msg) {
         int sum = 0;
         for (DataItem d : items.values()) {
@@ -237,7 +203,7 @@ public class DSS extends AbstractNode {
         if (!hasDecided(msg.transactionID)) {
             if (votes.get(msg.transactionID) == DSSVote.YES) {
                 log("Timeout. Asking around.");
-                multicast(new DSSDecisionRequest(msg.transactionID));
+                multicast(new DSSVoteRequest(msg.transactionID));
             }
         }
     }
@@ -276,5 +242,41 @@ public class DSS extends AbstractNode {
             return;
         }
         // coordinators.get(m.transactionID).tell(m, getSelf());
+    }
+
+    private void checkConsistency(DSSMessage msg){
+
+        PrivateWorkspace currentPrivateWorkspace =
+                this.privateWorkspaces.getOrDefault(msg.transactionID, new PrivateWorkspace());
+        boolean commit = true;
+        List<DataItem> locked = new ArrayList<>();
+
+        for (Map.Entry<Integer, DataItem> modifiedEntry : currentPrivateWorkspace.entrySet()) {
+            DataItem originalDataItem = this.items.get(modifiedEntry.getKey());
+            if (originalDataItem.acquireLock()
+                    && ((originalDataItem.getVersion().equals(modifiedEntry.getValue().getVersion() - 1)
+                    || originalDataItem.getVersion().equals(modifiedEntry.getValue().getVersion())))) {
+                locked.add(originalDataItem);
+            } else {
+                commit = false;
+            }
+        }
+        if (!commit) {
+            this.lockedItems.put(msg.transactionID, locked);
+            this.getSelf().tell(new DSSDecisionResponse(msg.transactionID, DSSDecision.ABORT), getSelf());
+            votes.put(msg.transactionID, DSSVote.NO);
+            log("sending vote NO");
+        } else {
+            votes.put(msg.transactionID, DSSVote.YES);
+            log("sending vote YES");
+        }
+
+
+    }
+
+    private boolean hasVoted(String tID){
+
+        return this.votes.get(tID) != null;
+
     }
 }
