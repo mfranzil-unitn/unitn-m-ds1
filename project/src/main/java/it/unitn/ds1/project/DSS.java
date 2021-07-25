@@ -2,6 +2,8 @@ package it.unitn.ds1.project;
 
 import akka.actor.ActorRef;
 import akka.actor.Props;
+import it.unitn.ds1.common.Log;
+import it.unitn.ds1.common.LogLevel;
 import it.unitn.ds1.project.message.DSSWelcomeMsg;
 import it.unitn.ds1.project.message.dss.DSSMessage;
 import it.unitn.ds1.project.message.dss.Recovery;
@@ -19,10 +21,10 @@ import it.unitn.ds1.project.message.dss.write.DSSWriteRequestMsg;
 import it.unitn.ds1.project.model.DataItem;
 import it.unitn.ds1.project.model.PrivateWorkspace;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.io.BufferedWriter;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.util.*;
 
 /*-- The data store -----------------------------------------------------------*/
 public class DSS extends AbstractNode {
@@ -31,13 +33,21 @@ public class DSS extends AbstractNode {
     private final Map<String, PrivateWorkspace> privateWorkspaces = new HashMap<>();
     private final Map<String, List<DataItem>> lockedItems = new HashMap<>();
 
-    private Map<String, ActorRef> coordinators = new HashMap<>();
+    private final Map<String, ActorRef> coordinators = new HashMap<>();
     private final List<ActorRef> dataStores = new ArrayList<>();
     private final Map<String, DSSVote> votes = new HashMap<>();
 
+    private final BufferedWriter writeAheadLog;
 
     public DSS(int id, int lowerBound) {
         super(id);
+
+        try {
+            writeAheadLog = new BufferedWriter(new FileWriter(this.id + "-log"));
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
         for (int i = lowerBound; i < lowerBound + 10; i++) {
             //   this.items.put(i, new DataItem(r.nextInt(), 1));
             this.items.put(i, new DataItem(100, 1));
@@ -83,7 +93,7 @@ public class DSS extends AbstractNode {
     /* -- R/W messages -------------------------- */
 
     private void onDSSReadRequest(DSSReadRequestMsg msg) {
-        log("received DSSReadRequest for tID " + msg.transactionID + ", key: " + msg.key);
+        Log.log(LogLevel.DEBUG, this.id, "Received DSSReadRequest for tID " + msg.transactionID + ", key: " + msg.key);
         PrivateWorkspace currentPrivateWorkspace = getWorkspace(msg.transactionID);
 
         if (!currentPrivateWorkspace.containsKey(msg.key)) {
@@ -97,17 +107,25 @@ public class DSS extends AbstractNode {
         ActorRef sender = getSender();
         delay(r.nextInt(MAX_DELAY));
         sender.tell(responseMsg, this.getSelf());
-        log("sent DSSReadResponse");
+        Log.log(LogLevel.DEBUG, this.id, "Sent DSSReadResponse");
     }
 
     private void onDSSWriteRequest(DSSWriteRequestMsg msg) {
-        log("received DSSWriteRequest for tID " + msg.transactionID + ", key: " + msg.key + ", value: " + msg.value);
+        Log.log(LogLevel.DEBUG, this.id, "Received DSSWriteRequest for tID " + msg.transactionID + ", key: " + msg.key + ", value: " + msg.value);
 
         PrivateWorkspace currentPrivateWorkspace = getWorkspace(msg.transactionID);
 
         if (!currentPrivateWorkspace.containsKey(msg.key)) {
             DataItem copy = new DataItem(this.items.get(msg.key));
             currentPrivateWorkspace.put(msg.key, copy);
+        }
+
+        try {
+            writeAheadLog.write(id + "@" + msg.transactionID + ";" + msg.key
+                    + "=" + msg.value + ";v=" + currentPrivateWorkspace.get(msg.key).getVersion());
+            writeAheadLog.flush();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
         }
 
         currentPrivateWorkspace.get(msg.key).setValue(msg.value);
@@ -134,13 +152,13 @@ public class DSS extends AbstractNode {
     /* -- Commit messages ---------------------- */
 
     public void onVoteRequest(DSSVoteRequest msg) {
-        log("Received VoteRequest for tID " + msg.transactionID);
+        Log.log(LogLevel.DEBUG, this.id, "Received VoteRequest for tID " + msg.transactionID);
         if (!this.hasVoted(msg.transactionID)) {
             this.checkConsistency(msg);
         }
 
         if (Init.CRASH_DSS_BEFORE_VOTE_RESPONSE) {
-            crash(CRASH_TIME);
+            crash();
             return;
         }
 
@@ -149,8 +167,7 @@ public class DSS extends AbstractNode {
         setTimeout(msg.transactionID, DECISION_TIMEOUT);
 
         if (Init.CRASH_DSS_BEFORE_DECISION_RESPONSE) {
-            crash(CRASH_TIME);
-            return;
+            crash();
         }
     }
 
@@ -162,42 +179,42 @@ public class DSS extends AbstractNode {
         timeouts.get(msg.transactionID).cancel();
         PrivateWorkspace privateWorkspace = this.privateWorkspaces.get(msg.transactionID);
 
-        synchronized (System.out) {
-            if (privateWorkspace != null) {
-                System.out.print(id + " touched for " + msg.transactionID + " [");
+        if (privateWorkspace != null) {
+            synchronized (System.out) {
+                Log.partialLog(true, LogLevel.DEBUG, id, "Touched in tID " + msg.transactionID + ": [");
                 privateWorkspace.forEach((k, v) -> {
-                    System.out.print("" + k + ", ");//+  ": " + v.getValue() + "], ");
+                    Log.partialLog(false, LogLevel.DEBUG, id, "" + k + ", ");//+  ": " + v.getValue() + "], ");
                 });
-                System.out.println("]");
+                Log.partialLog(false, LogLevel.DEBUG, id, "]\n");
             }
-        }
 
-        switch (msg.decision) {
-            case COMMIT:
-                if (privateWorkspace != null) {
+            switch (msg.decision) {
+                case COMMIT:
                     privateWorkspace.forEach((key, value) -> {
                         this.items.get(key).setValue(value.getValue());
                         this.items.get(key).setVersion(value.getVersion());
                         this.items.get(key).releaseLock();
                     });
-                }
+                    break;
+                case ABORT:
+                    List<DataItem> dataItems = this.lockedItems.get(msg.transactionID);
+                    if (dataItems != null) {
+                        dataItems.forEach(DataItem::releaseLock);
+                    }
+                    break;
+            }
 
-                break;
-            case ABORT:
-                this.lockedItems.getOrDefault(msg.transactionID, new ArrayList<>())
-                        .forEach(DataItem::releaseLock);
-                break;
+            this.privateWorkspaces.remove(msg.transactionID);
+        } else {
+            // Not my business, let's continue
         }
-
-        this.privateWorkspaces.remove(msg.transactionID);
         this.coordinators.remove(msg.transactionID);
         fixDecision(msg.transactionID, msg.decision);
     }
 
 
-    private void onVoteResponse(DSSVoteResponse msg){
-
-        if( msg.vote.equals(DSSVote.NO) )
+    private void onVoteResponse(DSSVoteResponse msg) {
+        if (msg.vote.equals(DSSVote.NO))
             multicast(new DSSDecisionResponse(msg.transactionID, DSSDecision.ABORT));
     }
 
@@ -207,17 +224,18 @@ public class DSS extends AbstractNode {
             sum += d.getValue();
         }
 
-        log("sum: " + sum);
+        Log.log(LogLevel.BASIC, this.id, "Sum: " + sum);
     }
 
     @Override
     protected void onTimeout(Timeout msg) {
         timeouts.remove(msg.transactionID);
         // we assume that vote request arrives sooner or later so no forced abort
-        log("timeout: I have decided " + hasDecided(msg.transactionID) + " - " + votes.get(msg.transactionID));
+        Log.log(LogLevel.BASIC, this.id, "Timeout. Decided? " + hasDecided(msg.transactionID)
+                + ". My vote? " + votes.get(msg.transactionID));
         if (!hasDecided(msg.transactionID)) {
             if (votes.get(msg.transactionID) == DSSVote.YES) {
-                log("Timeout. Asking around.");
+                //Log.log(this.id, "Timeout. Asking around.");
                 multicast(new DSSVoteRequest(msg.transactionID));
 
                 // If nobody responds to the timeout (e.g. if the coordinator crashed when everyone was in ready
@@ -234,7 +252,7 @@ public class DSS extends AbstractNode {
         // (in any case, it does not break the protocol)
         for (String transactionID : privateWorkspaces.keySet()) {
             if (!hasDecided(transactionID)) {
-                log("Recovery. Asking the coordinator.");
+                Log.log(LogLevel.BASIC, this.id, "Recovery. Asking the coordinator for tID + " + transactionID);
                 coordinators.keySet().forEach(key -> {
                     ActorRef actor = coordinators.get(key);
                     delay(r.nextInt(MAX_DELAY));
@@ -254,47 +272,50 @@ public class DSS extends AbstractNode {
     }
 
     @Override
-    protected void multicastAndCrash(DSSMessage m, int recoverIn) {
+    protected void multicastAndCrash(DSSMessage m) {
         for (ActorRef p : dataStores) {
             p.tell(m, getSelf());
-            crash(recoverIn);
+            crash();
             return;
         }
         // coordinators.get(m.transactionID).tell(m, getSelf());
     }
 
-    private void checkConsistency(DSSMessage msg){
-
+    private void checkConsistency(DSSMessage msg) {
         PrivateWorkspace currentPrivateWorkspace =
                 this.privateWorkspaces.getOrDefault(msg.transactionID, new PrivateWorkspace());
         boolean commit = true;
         List<DataItem> locked = new ArrayList<>();
 
-        for (Map.Entry<Integer, DataItem> modifiedEntry : currentPrivateWorkspace.entrySet()) {
+        for (Iterator<Map.Entry<Integer, DataItem>> iterator = currentPrivateWorkspace.entrySet().iterator();
+             iterator.hasNext() && commit;
+        ) {
+            Map.Entry<Integer, DataItem> modifiedEntry = iterator.next();
             DataItem originalDataItem = this.items.get(modifiedEntry.getKey());
-            if (originalDataItem.acquireLock()
-                    && ((originalDataItem.getVersion().equals(modifiedEntry.getValue().getVersion() - 1)
-                    || originalDataItem.getVersion().equals(modifiedEntry.getValue().getVersion())))) {
+
+            if (originalDataItem.acquireLock()) {
                 locked.add(originalDataItem);
-            } else {
+            }
+
+            if (!originalDataItem.getVersion().equals(modifiedEntry.getValue().getVersion() - 1) &&
+                    !originalDataItem.getVersion().equals(modifiedEntry.getValue().getVersion())) {
+                Log.log(LogLevel.BASIC, this.id, "Failed to acquire lock for item " + modifiedEntry.getKey());
                 commit = false;
             }
         }
+
         if (!commit) {
             this.lockedItems.put(msg.transactionID, locked);
             this.getSelf().tell(new DSSDecisionResponse(msg.transactionID, DSSDecision.ABORT), getSelf());
             votes.put(msg.transactionID, DSSVote.NO);
-            log("sending vote NO");
+            Log.log(LogLevel.BASIC, this.id, "Sending vote NO");
         } else {
             votes.put(msg.transactionID, DSSVote.YES);
-            log("sending vote YES");
+            Log.log(LogLevel.INFO, this.id, "Sending vote YES");
         }
-
-
     }
 
-    private boolean hasVoted(String tID){
-
+    private boolean hasVoted(String tID) {
         return this.votes.get(tID) != null;
 
     }

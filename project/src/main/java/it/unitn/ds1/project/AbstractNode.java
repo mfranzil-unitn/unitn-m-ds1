@@ -2,6 +2,8 @@ package it.unitn.ds1.project;
 
 import akka.actor.AbstractActor;
 import akka.actor.Cancellable;
+import it.unitn.ds1.common.Log;
+import it.unitn.ds1.common.LogLevel;
 import it.unitn.ds1.project.message.dss.DSSMessage;
 import it.unitn.ds1.project.message.dss.Recovery;
 import it.unitn.ds1.project.message.dss.Timeout;
@@ -57,13 +59,13 @@ public abstract class AbstractNode extends AbstractActor {
     protected abstract void onRecovery(Recovery msg);
     protected abstract void onTimeout(Timeout msg);
 
-    protected void crash(int recoverIn) {
+    protected void crash() {
         getContext().become(crashed());
-        log(" [CRASHED]");
+        Log.log(LogLevel.DEBUG, this.id, "Entered crashed mode");
 
         // setting a timer to "recover"
         getContext().system().scheduler().scheduleOnce(
-                Duration.create(recoverIn, TimeUnit.MILLISECONDS),
+                Duration.create(AbstractNode.CRASH_TIME, TimeUnit.MILLISECONDS),
                 getSelf(),
                 new Recovery(), // message sent to myself
                 getContext().system().dispatcher(), getSelf()
@@ -72,7 +74,8 @@ public abstract class AbstractNode extends AbstractActor {
 
     // multicast
     protected abstract void multicast(DSSMessage m);
-    protected abstract void multicastAndCrash(DSSMessage m, int recoverIn);
+
+    protected abstract void multicastAndCrash(DSSMessage m);
 
 
     // schedule a Timeout message in specified time
@@ -89,7 +92,7 @@ public abstract class AbstractNode extends AbstractActor {
     protected void fixDecision(String transactionID, DSSDecision d) {
         if (!hasDecided(transactionID)) {
             this.decision.put(transactionID, d);
-            log("fixed decision " + d);
+            Log.log(LogLevel.INFO, this.id, "Fixed decision " + d);
         }
     }
 
@@ -105,10 +108,6 @@ public abstract class AbstractNode extends AbstractActor {
     }
 
     /* -- Auxiliary ---------------------- */
-
-    protected void log(String s) {
-        System.out.format("%2d: %s\n", id, s);
-    }
 
     protected void delay(int d) {
         try {

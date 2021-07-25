@@ -3,6 +3,8 @@ package it.unitn.ds1.project;
 import akka.actor.ActorRef;
 import akka.actor.Props;
 import it.unitn.ds1.common.BidiHashMap;
+import it.unitn.ds1.common.Log;
+import it.unitn.ds1.common.LogLevel;
 import it.unitn.ds1.project.message.CoordinatorWelcomeMsg;
 import it.unitn.ds1.project.message.dss.DSSMessage;
 import it.unitn.ds1.project.message.dss.Recovery;
@@ -80,17 +82,19 @@ public class Coordinator extends AbstractNode {
     /*-- Actor methods (for Client) -------------------------------------------------------- */
 
     private void onTxnBegin(TxnBeginMsg msg) {
-        log("received TxnBegin from " + msg.clientId);
+        Log.log(LogLevel.DEBUG, this.id, "Received TxnBegin from " + msg.clientId);
         String transactionID = UUID.randomUUID().toString();
         this.transactionMapping.put(getSender(), transactionID);
         this.yesVotersMap.putIfAbsent(transactionID, new HashSet<>());
         delay(r.nextInt(MAX_DELAY));
         getSender().tell(new TxnAcceptMsg(), getSelf());
-        log("assigned tID " + transactionID + " to Txn involving " + msg.clientId);
+        Log.log(LogLevel.BASIC, this.id, "Assigned tID " + transactionID
+                + " to Txn involving client" + msg.clientId);
     }
 
     private void onTxnReadRequest(TxnReadRequestMsg msg) {
-        log("received TxnReadRequest from  " + msg.clientId + " and key " + msg.key);
+        Log.log(LogLevel.DEBUG, this.id, "Received TxnReadRequest from  "
+                + msg.clientId + " and key " + msg.key);
         // Forwarding request to relevant DSS
         delay(r.nextInt(MAX_DELAY));
         getCorrespondingDSS(msg.key).tell(        // get transactionID    // key     //
@@ -99,7 +103,8 @@ public class Coordinator extends AbstractNode {
     }
 
     private void onTxnWriteRequest(TxnWriteRequestMsg msg) {
-        log("received TxnWriteRequest from " + msg.clientId + ", key: " + msg.key + ", value: " + msg.value);
+        Log.log(LogLevel.DEBUG, this.id, "Received TxnWriteRequest from "
+                + msg.clientId + ", key: " + msg.key + ", value: " + msg.value);
         // Forwarding request to relevant DSS
         delay(r.nextInt(MAX_DELAY));
         getCorrespondingDSS(msg.key).tell(        // get transactionID    // key     //
@@ -111,41 +116,49 @@ public class Coordinator extends AbstractNode {
         // we need to start the logic for initiating the 2pc
         String transactionID = transactionMapping.get(getSender());
 
+        // If the client chose not to commit we must respect his choice
+        if (!msg.commit) {
+            fixDecision(transactionID, DSSDecision.ABORT);
 
-        if (Init.CRASH_COORDINATOR_AFTER_ONE_VOTE_REQUEST
-                && !Init.CRASH_COORDINATOR_AFTER_ALL_VOTE_REQUEST) {
-            multicastAndCrash(new DSSVoteRequest(transactionID), CRASH_TIME);
-        } else if (
-                (!Init.CRASH_COORDINATOR_AFTER_ONE_VOTE_REQUEST
-                        && Init.CRASH_COORDINATOR_AFTER_ALL_VOTE_REQUEST) ||
-                        (Init.CRASH_COORDINATOR_AFTER_ONE_VOTE_REQUEST
-                                && Init.CRASH_COORDINATOR_AFTER_ALL_VOTE_REQUEST)
-        ) {
-            multicast(new DSSVoteRequest(transactionID));
-            crash(CRASH_TIME);
+            multicast(new DSSDecisionResponse(transactionID, decision.get(transactionID)));
+
+            ActorRef destination = transactionMapping.getKey(transactionID);
+            delay(r.nextInt(MAX_DELAY));
+            destination.tell(new TxnResultMsg(false), getSelf());
         } else {
-            multicast(new DSSVoteRequest(transactionID));
-        }
+            if (Init.CRASH_COORDINATOR_AFTER_ONE_VOTE_REQUEST && !Init.CRASH_COORDINATOR_AFTER_ALL_VOTE_REQUEST) {
+                multicastAndCrash(new DSSVoteRequest(transactionID));
+            } else if (
+                    (!Init.CRASH_COORDINATOR_AFTER_ONE_VOTE_REQUEST && Init.CRASH_COORDINATOR_AFTER_ALL_VOTE_REQUEST) ||
+                            (Init.CRASH_COORDINATOR_AFTER_ONE_VOTE_REQUEST && Init.CRASH_COORDINATOR_AFTER_ALL_VOTE_REQUEST)
+            ) {
+                multicast(new DSSVoteRequest(transactionID));
+                crash();
+            } else {
+                multicast(new DSSVoteRequest(transactionID));
+            }
 
-        setTimeout(transactionID, VOTE_TIMEOUT);
+            setTimeout(transactionID, VOTE_TIMEOUT);
+        }
 
         if (Init.CRASH_COORDINATOR_BEFORE_DECISION_RESPONSE) {
-            crash(CRASH_TIME);
+            crash();
         }
+
     }
 
 
     /*-- Actor methods (for DSS) -------------------------------------------------------- */
 
     private void onDSSReadResult(DSSReadResultMsg msg) {
-        log("received DSSReadResult for tID " + msg.transactionID
-                + ": key " + msg.key + ", value: " + msg.value);
+        Log.log(LogLevel.DEBUG, this.id, "Received DSSReadResult for tID " + msg.transactionID
+                + ": k=" + msg.key + ", v=" + msg.value);
         // Get who asked for the value originally
         ActorRef destination = transactionMapping.getKey(msg.transactionID);
         // Tell client of <key, value>
         delay(r.nextInt(MAX_DELAY));
         destination.tell(new TxnReadResultMsg(msg.key, msg.value), getSelf());
-        log("sent TxnReadResult");
+        Log.log(LogLevel.DEBUG, this.id, "Sent TxnReadResult");
 
     }
 
@@ -155,7 +168,7 @@ public class Coordinator extends AbstractNode {
     protected void onTimeout(Timeout msg) {
         timeouts.remove(msg.transactionID);
         if (!hasDecided(msg.transactionID)) {
-            log("Timeout. DSSDecision not taken, I'll just abort.");
+            Log.log(LogLevel.BASIC, this.id, "Timeout. Decision not taken, I'll just abort.");
             fixDecision(msg.transactionID, DSSDecision.ABORT);
 
             // crashyDecisionResponse(msg.transactionID);
@@ -208,8 +221,8 @@ public class Coordinator extends AbstractNode {
     private void crashyDecisionResponse(String transactionID) {
         if (Init.CRASH_COORDINATOR_AFTER_ONE_DECISION_RESPONSE
                 && !Init.CRASH_COORDINATOR_AFTER_ALL_DECISION_RESPONSE) {
-            multicastAndCrash(new DSSDecisionResponse(transactionID, decision.get(transactionID)),
-                    CRASH_TIME);
+            multicastAndCrash(new DSSDecisionResponse(transactionID, decision.get(transactionID))
+            );
         } else if (
                 (!Init.CRASH_COORDINATOR_AFTER_ONE_DECISION_RESPONSE
                         && Init.CRASH_COORDINATOR_AFTER_ALL_DECISION_RESPONSE) ||
@@ -217,7 +230,7 @@ public class Coordinator extends AbstractNode {
                                 && Init.CRASH_COORDINATOR_AFTER_ALL_DECISION_RESPONSE)
         ) {
             multicast(new DSSDecisionResponse(transactionID, decision.get(transactionID)));
-            crash(CRASH_TIME);
+            crash();
         } else {
             multicast(new DSSDecisionResponse(transactionID, decision.get(transactionID)));
         }
@@ -228,9 +241,9 @@ public class Coordinator extends AbstractNode {
         getContext().become(createReceive());
 
         transactionMapping.forEach((client, transactionID) -> {
-            log("Recovery. " + hasDecided(transactionID) + " - " + decision);
+            Log.log(LogLevel.BASIC, this.id, "Recovery. Decided? " + hasDecided(transactionID)
+                    + ". My decision? " + (decision == null ? "null" : decision));
             if (!hasDecided(transactionID)) {
-                log("Recovery. Haven't decide, I'll just abort.");
                 fixDecision(transactionID, DSSDecision.ABORT);
             }
 
@@ -251,11 +264,11 @@ public class Coordinator extends AbstractNode {
     }
 
     @Override
-    protected void multicastAndCrash(DSSMessage m, int recoverIn) {
+    protected void multicastAndCrash(DSSMessage m) {
         // Crashes after one message
         for (ActorRef datastore : dataStores) {
             datastore.tell(m, getSelf());
-            crash(recoverIn);
+            crash();
             return;
         }
     }

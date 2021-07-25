@@ -4,6 +4,8 @@ import akka.actor.AbstractActor;
 import akka.actor.ActorRef;
 import akka.actor.Cancellable;
 import akka.actor.Props;
+import it.unitn.ds1.common.Log;
+import it.unitn.ds1.common.LogLevel;
 import it.unitn.ds1.project.message.ClientWelcomeMsg;
 import it.unitn.ds1.project.message.StopMsg;
 import it.unitn.ds1.project.message.txn.begin.TxnAcceptMsg;
@@ -22,12 +24,15 @@ import java.util.concurrent.TimeUnit;
 
 public class Client extends AbstractActor {
 
-    private static final double COMMIT_PROBABILITY = 0.8;
+    private static final double COMMIT_PROBABILITY = 1;
     private static final double WRITE_PROBABILITY = 0.5;
+
+    private static final int MAX_SEQUENTIAL_TXN = 8;
 
     private static final int MIN_TXN_LENGTH = 20;
     private static final int MAX_TXN_LENGTH = 40;
     private static final int RAND_LENGTH_RANGE = MAX_TXN_LENGTH - MIN_TXN_LENGTH + 1;
+
 
     private final Integer clientId;
     private List<ActorRef> coordinators;
@@ -38,6 +43,10 @@ public class Client extends AbstractActor {
     // keep track of the number of TXNs (attempted, successfully committed)
     private Integer numAttemptedTxn;
     private Integer numCommittedTxn;
+
+    private Integer numAttemptedTxnInWave;
+    private Integer numMaxTxnInWave;
+
 
     // TXN operation (move some amount from a value to another)
     private Boolean acceptedTxn;
@@ -105,7 +114,7 @@ public class Client extends AbstractActor {
                 new TxnAcceptTimeoutMsg(), // message sent to myself
                 getContext().system().dispatcher(), getSelf()
         );
-        log("BEGIN");
+        Log.log(LogLevel.BASIC, clientId, "BEGIN [" + numAttemptedTxnInWave + "/" + numMaxTxnInWave + "]");
     }
 
     // end the current TXN sending TxnEndMsg to the coordinator
@@ -114,7 +123,8 @@ public class Client extends AbstractActor {
         currentCoordinator.tell(new TxnEndMsg(clientId, doCommit), getSelf());
         firstValue = null;
         secondValue = null;
-        log("END");
+        Log.log(LogLevel.BASIC, clientId, "END OF TXN ["
+                + numAttemptedTxnInWave + "/" + numMaxTxnInWave + "]" + (!doCommit ? " (force abort)" : ""));
     }
 
     // READ two items (will move some amount from the value of the first to the second)
@@ -131,7 +141,7 @@ public class Client extends AbstractActor {
         // delete the current read values
         firstValue = null;
         secondValue = null;
-        log("READ #" + numOpDone + " (" + firstKey + "), (" + secondKey + ")");
+        Log.log(LogLevel.INFO, clientId, "READ #" + numOpDone + " (" + firstKey + "), (" + secondKey + ")");
     }
 
     // WRITE two items (called with probability WRITE_PROBABILITY after readTwo() values are returned)
@@ -141,7 +151,7 @@ public class Client extends AbstractActor {
         if (firstValue >= 1) amountTaken = 1 + r.nextInt(firstValue);
         currentCoordinator.tell(new TxnWriteRequestMsg(clientId, firstKey, firstValue - amountTaken), getSelf());
         currentCoordinator.tell(new TxnWriteRequestMsg(clientId, secondKey, secondValue + amountTaken), getSelf());
-        log("WRITE #" + numOpDone
+        Log.log(LogLevel.INFO, clientId, "WRITE #" + numOpDone
                 + " taken " + amountTaken
                 + " (" + firstKey + ", " + (firstValue - amountTaken) + "), ("
                 + secondKey + ", " + (secondValue + amountTaken) + ")");
@@ -150,6 +160,8 @@ public class Client extends AbstractActor {
     /*-- General messages ----------------------------------------------------- */
 
     private void onClientWelcome(ClientWelcomeMsg msg) {
+        this.numAttemptedTxnInWave = 1;
+        this.numMaxTxnInWave = r.nextInt(MAX_SEQUENTIAL_TXN) + 1;
         this.coordinators = msg.coordinators;
         this.maxKey = msg.maxKey;
         beginTxn();
@@ -162,36 +174,41 @@ public class Client extends AbstractActor {
     /*-- Transaction messages ----------------------------------------------------- */
 
     private void onTxnAccept(TxnAcceptMsg msg) {
-        log("received TxnAccept");
+        Log.log(LogLevel.DEBUG, clientId, "Received TxnAccept");
         acceptedTxn = true;
         acceptTimeout.cancel();
         readTwo();
     }
 
-    private void onTxnAcceptTimeout(TxnAcceptTimeoutMsg msg) throws InterruptedException {
+    private void onTxnAcceptTimeout(TxnAcceptTimeoutMsg msg) {
         if (!acceptedTxn) {
-            log("Timed out, retrying...");
+            Log.log(LogLevel.BASIC, clientId, "Timed out, retrying...");
             beginTxn();
         }
     }
 
     private void onReadResult(TxnReadResultMsg msg) {
-        log("READ RESULT (" + msg.key + ", " + msg.value + ")");
+        Log.log(LogLevel.INFO, clientId, "READ RESULT (" + msg.key + ", " + msg.value + ")");
 
         // save the read value(s)
         if (msg.key.equals(firstKey)) firstValue = msg.value;
         if (msg.key.equals(secondKey)) secondValue = msg.value;
 
-        boolean opDone = (firstValue != null && secondValue != null);
+        boolean opDone = firstValue != null && secondValue != null;
 
         // do we only read or also write?
         double writeRandom = r.nextDouble();
         boolean doWrite = writeRandom < WRITE_PROBABILITY;
-        if (doWrite && opDone) writeTwo();
+        if (doWrite && opDone) {
+            writeTwo();
+        }
 
         // check if the transaction should end;
         // otherwise, read two again
-        if (opDone) numOpDone++;
+        if (opDone) {
+            numOpDone++;
+        }
+
         if (numOpDone >= numOpTotal) {
             endTxn();
         } else if (opDone) {
@@ -199,29 +216,31 @@ public class Client extends AbstractActor {
         }
     }
 
-    private void onTxnResult(TxnResultMsg msg) throws InterruptedException {
+    private void onTxnResult(TxnResultMsg msg) {
         if (msg.commit) {
             numCommittedTxn++;
-            log("COMMIT OK (" + numCommittedTxn + "/" + numAttemptedTxn + ")");
+            Log.log(LogLevel.BASIC, clientId, "COMMIT OK [wave "
+                    + numAttemptedTxnInWave + "/" + numMaxTxnInWave + "] (total committed " +
+                    "" + numCommittedTxn + "/" + numAttemptedTxn + ")");
         } else {
-            log("COMMIT FAIL (" + (numAttemptedTxn - numCommittedTxn) + "/" + numAttemptedTxn + ")");
+            Log.log(LogLevel.BASIC, clientId, "COMMIT FAIL [wave " +
+                    numAttemptedTxnInWave + "/" + numMaxTxnInWave + "] (total committed " +
+                    (numCommittedTxn) + "/" + numAttemptedTxn + ")");
         }
 
-        /*
-        try {
-            System.out.println(">>> Press ENTER to continue <<<");
-            System.in.read();
-        } catch (IOException e) {
-            e.printStackTrace();
+        numAttemptedTxnInWave++;
+
+        if (numAttemptedTxnInWave <= numMaxTxnInWave) {
+            try {
+                // Random wait
+                Thread.sleep(r.nextInt(3000));
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+            beginTxn();
+        } else {
+            Log.log(LogLevel.BASIC, clientId, "-----------> WAVE TERMINATED <-----------");
         }
-
-        */
-
-        //beginTxn();
-    }
-
-    void log(String s) {
-        System.out.format("%2d: %s\n", clientId, s);
     }
 
 }

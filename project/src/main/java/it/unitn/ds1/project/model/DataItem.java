@@ -49,4 +49,14 @@ public class DataItem {
     public void releaseLock() {
         this.locked.set(false);
     }
+
+    @Override
+    public String toString() {
+        return "DataItem{" +
+                "value=" + value +
+                ", version=" + version +
+                ", touched=" + touched +
+                ", locked=" + locked +
+                '}';
+    }
 }
