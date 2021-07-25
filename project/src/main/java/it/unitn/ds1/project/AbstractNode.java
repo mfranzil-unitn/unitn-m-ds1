@@ -18,8 +18,8 @@ import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
 public abstract class AbstractNode extends AbstractActor {
-    final static int VOTE_TIMEOUT = 5000;      // timeout for the votes, ms
-    final static int DECISION_TIMEOUT = 5000;  // timeout for the decision, ms
+    final static int VOTE_TIMEOUT = 50000;      // timeout for the votes, ms
+    final static int DECISION_TIMEOUT = 50000;  // timeout for the decision, ms
 
     final static int CRASH_TIME = 7000;
 

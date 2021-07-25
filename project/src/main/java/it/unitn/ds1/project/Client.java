@@ -29,8 +29,8 @@ public class Client extends AbstractActor {
 
     private static final int MAX_SEQUENTIAL_TXN = 8;
 
-    private static final int MIN_TXN_LENGTH = 20;
-    private static final int MAX_TXN_LENGTH = 40;
+    private static final int MIN_TXN_LENGTH = 5;
+    private static final int MAX_TXN_LENGTH = 10;
     private static final int RAND_LENGTH_RANGE = MAX_TXN_LENGTH - MIN_TXN_LENGTH + 1;
 
 

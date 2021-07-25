@@ -293,10 +293,13 @@ public class DSS extends AbstractNode {
 
             if (originalDataItem.acquireLock()) {
                 locked.add(originalDataItem);
+            } else {
+                commit = false;
             }
 
-            if (!originalDataItem.getVersion().equals(modifiedEntry.getValue().getVersion() - 1) &&
-                    !originalDataItem.getVersion().equals(modifiedEntry.getValue().getVersion())) {
+            if (commit && !originalDataItem.getVersion().equals(modifiedEntry.getValue().getVersion() - 1) &&
+                    !(originalDataItem.getVersion().equals(modifiedEntry.getValue().getVersion()) &&
+                            originalDataItem.getValue().equals(modifiedEntry.getValue().getValue()))) {
                 Log.log(LogLevel.BASIC, this.id, "Failed to acquire lock for item " + modifiedEntry.getKey());
                 commit = false;
             }
