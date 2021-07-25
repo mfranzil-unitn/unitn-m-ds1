@@ -21,9 +21,6 @@ import it.unitn.ds1.project.message.dss.write.DSSWriteRequestMsg;
 import it.unitn.ds1.project.model.DataItem;
 import it.unitn.ds1.project.model.PrivateWorkspace;
 
-import java.io.BufferedWriter;
-import java.io.FileWriter;
-import java.io.IOException;
 import java.util.*;
 
 /*-- The data store -----------------------------------------------------------*/
@@ -37,16 +34,16 @@ public class DSS extends AbstractNode {
     private final List<ActorRef> dataStores = new ArrayList<>();
     private final Map<String, DSSVote> votes = new HashMap<>();
 
-    private final BufferedWriter writeAheadLog;
+    //private final BufferedWriter writeAheadLog;
 
     public DSS(int id, int lowerBound) {
         super(id);
 
-        try {
+        /*try {
             writeAheadLog = new BufferedWriter(new FileWriter(this.id + "-log"));
         } catch (IOException e) {
             throw new RuntimeException(e);
-        }
+        }*/
 
         for (int i = lowerBound; i < lowerBound + 10; i++) {
             //   this.items.put(i, new DataItem(r.nextInt(), 1));
@@ -119,7 +116,7 @@ public class DSS extends AbstractNode {
             DataItem copy = new DataItem(this.items.get(msg.key));
             currentPrivateWorkspace.put(msg.key, copy);
         }
-
+/*
         try {
             writeAheadLog.write(id + "@" + msg.transactionID + ";" + msg.key
                     + "=" + msg.value + ";v=" + currentPrivateWorkspace.get(msg.key).getVersion());
@@ -127,6 +124,7 @@ public class DSS extends AbstractNode {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+        */
 
         currentPrivateWorkspace.get(msg.key).setValue(msg.value);
         currentPrivateWorkspace.get(msg.key).incrementVersion();
