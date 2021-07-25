@@ -39,6 +39,9 @@ public class Coordinator extends AbstractNode {
     // here all the nodes that sent YES are collected
     private final HashMap<String, Set<ActorRef>> yesVotersMap = new HashMap<>();
 
+    // list of DSS contacted for a transaction
+    private final HashMap<String, Set<ActorRef>> dataStoreMapping = new HashMap<>();
+
     /*-- Actor constructor ---------------------------------------------------- */
 
     public Coordinator(int id) {
@@ -64,9 +67,9 @@ public class Coordinator extends AbstractNode {
                 // COORDINATOR <- DSS
                 .match(DSSReadResultMsg.class, this::onDSSReadResult)
 
-                .match(DSSVoteResponse.class, this::onVoteResponse)
+                .match(DSSVoteResponse.class, this::onDSSVoteResponse)
 
-                .match(DSSDecisionRequest.class, this::onDecisionRequest)
+                .match(DSSDecisionRequest.class, this::onDSSDecisionRequest)
 
                 .match(Timeout.class, this::onTimeout)
                 .match(Recovery.class, this::onRecovery)
@@ -84,31 +87,45 @@ public class Coordinator extends AbstractNode {
     private void onTxnBegin(TxnBeginMsg msg) {
         Log.log(LogLevel.DEBUG, this.id, "Received TxnBegin from " + msg.clientId);
         String transactionID = UUID.randomUUID().toString();
+
         this.transactionMapping.put(getSender(), transactionID);
         this.yesVotersMap.putIfAbsent(transactionID, new HashSet<>());
+        this.dataStoreMapping.putIfAbsent(transactionID, new HashSet<>());
+
         delay(r.nextInt(MAX_DELAY));
         getSender().tell(new TxnAcceptMsg(), getSelf());
-        Log.log(LogLevel.BASIC, this.id, "Assigned tID " + transactionID
+        Log.log(LogLevel.INFO, this.id, "Assigned tID " + transactionID
                 + " to Txn involving client" + msg.clientId);
     }
 
     private void onTxnReadRequest(TxnReadRequestMsg msg) {
         Log.log(LogLevel.DEBUG, this.id, "Received TxnReadRequest from  "
                 + msg.clientId + " and key " + msg.key);
+
         // Forwarding request to relevant DSS
+        String transactionID = transactionMapping.get(getSender());
+        ActorRef destination = getCorrespondingDSS(msg.key);
+
+        this.dataStoreMapping.get(transactionID).add(destination);
+
         delay(r.nextInt(MAX_DELAY));
-        getCorrespondingDSS(msg.key).tell(        // get transactionID    // key     //
-                new DSSReadRequestMsg(transactionMapping.get(getSender()), msg.key), getSelf());
+        destination.tell(new DSSReadRequestMsg(transactionID, msg.key), getSelf());
         // No response
     }
 
     private void onTxnWriteRequest(TxnWriteRequestMsg msg) {
         Log.log(LogLevel.DEBUG, this.id, "Received TxnWriteRequest from "
                 + msg.clientId + ", key: " + msg.key + ", value: " + msg.value);
+
         // Forwarding request to relevant DSS
+        String transactionID = transactionMapping.get(getSender());
+        ActorRef destination = getCorrespondingDSS(msg.key);
+
+        this.dataStoreMapping.get(transactionID).add(destination);
+
         delay(r.nextInt(MAX_DELAY));
-        getCorrespondingDSS(msg.key).tell(        // get transactionID    // key     //
-                new DSSWriteRequestMsg(transactionMapping.get(getSender()), msg.key, msg.value), getSelf());
+        destination.tell(new DSSWriteRequestMsg(transactionID, msg.key, msg.value), getSelf());
+
     }
 
     private void onTxnEnd(TxnEndMsg msg) {
@@ -126,25 +143,10 @@ public class Coordinator extends AbstractNode {
             delay(r.nextInt(MAX_DELAY));
             destination.tell(new TxnResultMsg(false), getSelf());
         } else {
-            if (Init.CRASH_COORDINATOR_AFTER_ONE_VOTE_REQUEST && !Init.CRASH_COORDINATOR_AFTER_ALL_VOTE_REQUEST) {
-                multicastAndCrash(new DSSVoteRequest(transactionID));
-            } else if (
-                    (!Init.CRASH_COORDINATOR_AFTER_ONE_VOTE_REQUEST && Init.CRASH_COORDINATOR_AFTER_ALL_VOTE_REQUEST) ||
-                            (Init.CRASH_COORDINATOR_AFTER_ONE_VOTE_REQUEST && Init.CRASH_COORDINATOR_AFTER_ALL_VOTE_REQUEST)
-            ) {
-                multicast(new DSSVoteRequest(transactionID));
-                crash();
-            } else {
-                multicast(new DSSVoteRequest(transactionID));
-            }
-
             setTimeout(transactionID, VOTE_TIMEOUT);
+            //crashyVoteRequest(transactionID);
+            multicast(new DSSVoteRequest(transactionID));
         }
-
-        if (Init.CRASH_COORDINATOR_BEFORE_DECISION_RESPONSE) {
-            crash();
-        }
-
     }
 
 
@@ -181,7 +183,7 @@ public class Coordinator extends AbstractNode {
         }
     }
 
-    private void onVoteResponse(DSSVoteResponse msg) {
+    private void onDSSVoteResponse(DSSVoteResponse msg) {
         //log("Received DSSVoteResponse with content v = "
         //        + msg.vote + " total yes? " + yesVotersMap.get(msg.transactionID).size());
 
@@ -198,16 +200,21 @@ public class Coordinator extends AbstractNode {
             transactionVoters.add(getSender());
 
             if (allVotedYes(msg.transactionID)) {
+                Log.log(LogLevel.INFO, this.id, "Received all YES votes. Committing");
                 timeouts.get(msg.transactionID).cancel();
                 fixDecision(msg.transactionID, DSSDecision.COMMIT);
                 yesVotersMap.remove(msg.transactionID);
 
-                crashyDecisionResponse(msg.transactionID);
+                multicast(new DSSDecisionResponse(msg.transactionID, decision.get(msg.transactionID)));
+                //crashyDecisionResponse(msg.transactionID);
+                //return;
             } else {
+                Log.log(LogLevel.INFO, this.id, "Received some YES votes. Keep going");
                 return; // nothing to do, we need to wait some more
             }
         } else { // a NO vote
             // on a single NO we decide ABORT
+            Log.log(LogLevel.INFO, this.id, "Received one NO vote. Aborting");
             fixDecision(msg.transactionID, DSSDecision.ABORT);
             multicast(new DSSDecisionResponse(msg.transactionID, decision.get(msg.transactionID)));
         }
@@ -219,20 +226,30 @@ public class Coordinator extends AbstractNode {
     }
 
     private void crashyDecisionResponse(String transactionID) {
-        if (Init.CRASH_COORDINATOR_AFTER_ONE_DECISION_RESPONSE
-                && !Init.CRASH_COORDINATOR_AFTER_ALL_DECISION_RESPONSE) {
-            multicastAndCrash(new DSSDecisionResponse(transactionID, decision.get(transactionID))
-            );
+        if (Init.CRASH_COORDINATOR_AFTER_ONE_DECISION_RESPONSE && !Init.CRASH_COORDINATOR_AFTER_ALL_DECISION_RESPONSE) {
+            multicastAndCrash(new DSSDecisionResponse(transactionID, decision.get(transactionID)));
         } else if (
-                (!Init.CRASH_COORDINATOR_AFTER_ONE_DECISION_RESPONSE
-                        && Init.CRASH_COORDINATOR_AFTER_ALL_DECISION_RESPONSE) ||
-                        (Init.CRASH_COORDINATOR_AFTER_ONE_DECISION_RESPONSE
-                                && Init.CRASH_COORDINATOR_AFTER_ALL_DECISION_RESPONSE)
+                (!Init.CRASH_COORDINATOR_AFTER_ONE_DECISION_RESPONSE && Init.CRASH_COORDINATOR_AFTER_ALL_DECISION_RESPONSE) ||
+                        (Init.CRASH_COORDINATOR_AFTER_ONE_DECISION_RESPONSE && Init.CRASH_COORDINATOR_AFTER_ALL_DECISION_RESPONSE)
         ) {
             multicast(new DSSDecisionResponse(transactionID, decision.get(transactionID)));
             crash();
         } else {
             multicast(new DSSDecisionResponse(transactionID, decision.get(transactionID)));
+        }
+    }
+
+    private void crashyVoteRequest(String transactionID) {
+        if (Init.CRASH_COORDINATOR_AFTER_ONE_VOTE_REQUEST && !Init.CRASH_COORDINATOR_AFTER_ALL_VOTE_REQUEST) {
+            multicastAndCrash(new DSSVoteRequest(transactionID));
+        } else if (
+                (!Init.CRASH_COORDINATOR_AFTER_ONE_VOTE_REQUEST && Init.CRASH_COORDINATOR_AFTER_ALL_VOTE_REQUEST) ||
+                        (Init.CRASH_COORDINATOR_AFTER_ONE_VOTE_REQUEST && Init.CRASH_COORDINATOR_AFTER_ALL_VOTE_REQUEST)
+        ) {
+            multicast(new DSSVoteRequest(transactionID));
+            crash();
+        } else {
+            multicast(new DSSVoteRequest(transactionID));
         }
     }
 
@@ -242,7 +259,9 @@ public class Coordinator extends AbstractNode {
 
         transactionMapping.forEach((client, transactionID) -> {
             Log.log(LogLevel.BASIC, this.id, "Recovery. Decided? " + hasDecided(transactionID)
-                    + ". My decision? " + (decision == null ? "null" : decision));
+                    + ". My decision? "
+                    + (decision.get(transactionID) == null ? "null" : decision.get(transactionID)));
+
             if (!hasDecided(transactionID)) {
                 fixDecision(transactionID, DSSDecision.ABORT);
             }
@@ -250,8 +269,7 @@ public class Coordinator extends AbstractNode {
             // crashyDecisionResponse(msg.transactionID);
             multicast(new DSSDecisionResponse(transactionID, decision.get(transactionID)));
 
-            client.tell(new TxnResultMsg(decision.get(transactionID) == DSSDecision.COMMIT),
-                    getSelf());
+            client.tell(new TxnResultMsg(decision.get(transactionID) == DSSDecision.COMMIT), getSelf());
         });
     }
 
@@ -268,16 +286,17 @@ public class Coordinator extends AbstractNode {
         // Crashes after one message
         for (ActorRef datastore : dataStores) {
             datastore.tell(m, getSelf());
-            crash();
-            return;
+            break;
         }
+        crash();
     }
 
     /* -- Auxiliary ------------------------ */
 
     private boolean allVotedYes(String transactionID) {
+        Set<ActorRef> contacted = this.dataStoreMapping.get(transactionID);
         Set<ActorRef> voters = yesVotersMap.get(transactionID);
-        return voters.size() >= dataStores.size();
+        return voters.size() >= contacted.size();
     }
 
     private ActorRef getCorrespondingDSS(int key) {

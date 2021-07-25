@@ -21,18 +21,22 @@ import it.unitn.ds1.project.message.dss.write.DSSWriteRequestMsg;
 import it.unitn.ds1.project.model.DataItem;
 import it.unitn.ds1.project.model.PrivateWorkspace;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 /*-- The data store -----------------------------------------------------------*/
 public class DSS extends AbstractNode {
 
     private final Map<Integer, DataItem> items = new HashMap<>();
+    private final List<ActorRef> dataStores = new ArrayList<>();
+
     private final Map<String, PrivateWorkspace> privateWorkspaces = new HashMap<>();
     private final Map<String, List<DataItem>> lockedItems = new HashMap<>();
-
     private final Map<String, ActorRef> coordinators = new HashMap<>();
-    private final List<ActorRef> dataStores = new ArrayList<>();
     private final Map<String, DSSVote> votes = new HashMap<>();
+    //private final Map<String, Boolean> alreadyTimedOut = new HashMap<>();
 
     //private final BufferedWriter writeAheadLog;
 
@@ -65,16 +69,16 @@ public class DSS extends AbstractNode {
                 .match(DSSReadRequestMsg.class, this::onDSSReadRequest)
                 .match(DSSWriteRequestMsg.class, this::onDSSWriteRequest)
 
-                .match(DSSVoteRequest.class, this::onVoteRequest)
+                .match(DSSVoteRequest.class, this::onDSSVoteRequest)
 
-                .match(DSSDecisionRequest.class, this::onDecisionRequest)
+                .match(DSSDecisionRequest.class, this::onDSSDecisionRequest)
                 .match(DSSDecisionResponse.class, this::onDecisionResponse)
 
                 .match(Timeout.class, this::onTimeout)
                 .match(Recovery.class, this::onRecovery)
 
                 // DSS -> DSS
-                .match(DSSVoteResponse.class, this::onVoteResponse)
+                .match(DSSVoteResponse.class, this::onDSSVoteResponse)
 
                 .match(RequestSummaryMsg.class, this::onRequestSummary)
 
@@ -126,8 +130,8 @@ public class DSS extends AbstractNode {
         }
         */
 
-        currentPrivateWorkspace.get(msg.key).setValue(msg.value);
-        currentPrivateWorkspace.get(msg.key).incrementVersion();
+        currentPrivateWorkspace.get(msg.key).setValue(msg.value, null);
+        currentPrivateWorkspace.get(msg.key).incrementVersion(null);
 
         // No message is sent for writes
         //this.getSender().tell(new DSSWriteResultMsg(msg.transactionID), getSelf());
@@ -136,6 +140,7 @@ public class DSS extends AbstractNode {
     private PrivateWorkspace getWorkspace(String transactionID) {
         // Add actorRef on coordinators if not present
         this.coordinators.putIfAbsent(transactionID, getSender());
+        //this.alreadyTimedOut.putIfAbsent(transactionID, false);
 
         PrivateWorkspace currentPrivateWorkspace = this.privateWorkspaces.get(transactionID);
 
@@ -149,8 +154,16 @@ public class DSS extends AbstractNode {
 
     /* -- Commit messages ---------------------- */
 
-    public void onVoteRequest(DSSVoteRequest msg) {
-        Log.log(LogLevel.DEBUG, this.id, "Received VoteRequest for tID " + msg.transactionID);
+    public void onDSSVoteRequest(DSSVoteRequest msg) {
+        if (privateWorkspaces.get(msg.transactionID) == null) {
+            assert (coordinators.get(msg.transactionID) == null);
+            assert (votes.get(msg.transactionID) == null);
+            assert (lockedItems.get(msg.transactionID) == null);
+            // Doesn't bother me, I will ignore
+            return;
+        }
+
+        Log.log(LogLevel.DEBUG, this.id, "Received DSSVoteRequest for tID " + msg.transactionID);
         if (!this.hasVoted(msg.transactionID)) {
             this.checkConsistency(msg);
         }
@@ -162,7 +175,11 @@ public class DSS extends AbstractNode {
 
         delay(r.nextInt(MAX_DELAY));
         this.getSender().tell(new DSSVoteResponse(msg.transactionID, votes.get(msg.transactionID)), getSelf());
+
+        //if (!this.alreadyTimedOut.get(msg.transactionID)) {
+        //    this.alreadyTimedOut.put(msg.transactionID, true);
         setTimeout(msg.transactionID, DECISION_TIMEOUT);
+        //}
 
         if (Init.CRASH_DSS_BEFORE_DECISION_RESPONSE) {
             crash();
@@ -174,7 +191,10 @@ public class DSS extends AbstractNode {
             throw new RuntimeException(id + ": received empty DSSDecisionResponse from " + msg.transactionID);
         }
 
-        timeouts.get(msg.transactionID).cancel();
+        if (timeouts.get(msg.transactionID) != null) {
+            timeouts.get(msg.transactionID).cancel();
+        }
+
         PrivateWorkspace privateWorkspace = this.privateWorkspaces.get(msg.transactionID);
 
         if (privateWorkspace != null) {
@@ -189,16 +209,15 @@ public class DSS extends AbstractNode {
             switch (msg.decision) {
                 case COMMIT:
                     privateWorkspace.forEach((key, value) -> {
-                        this.items.get(key).setValue(value.getValue());
-                        this.items.get(key).setVersion(value.getVersion());
-                        this.items.get(key).releaseLock();
+                        this.items.get(key).setValue(value.getValue(), getSelf());
+                        this.items.get(key).setVersion(value.getVersion(), getSelf());
                     });
-                    break;
                 case ABORT:
                     List<DataItem> dataItems = this.lockedItems.get(msg.transactionID);
                     if (dataItems != null) {
                         dataItems.forEach(DataItem::releaseLock);
                     }
+                    this.lockedItems.remove(msg.transactionID);
                     break;
             }
 
@@ -206,12 +225,14 @@ public class DSS extends AbstractNode {
         } else {
             // Not my business, let's continue
         }
+
         this.coordinators.remove(msg.transactionID);
+        //this.alreadyTimedOut.remove(msg.transactionID);
         fixDecision(msg.transactionID, msg.decision);
     }
 
 
-    private void onVoteResponse(DSSVoteResponse msg) {
+    private void onDSSVoteResponse(DSSVoteResponse msg) {
         if (msg.vote.equals(DSSVote.NO))
             multicast(new DSSDecisionResponse(msg.transactionID, DSSDecision.ABORT));
     }
@@ -229,16 +250,25 @@ public class DSS extends AbstractNode {
     protected void onTimeout(Timeout msg) {
         timeouts.remove(msg.transactionID);
         // we assume that vote request arrives sooner or later so no forced abort
-        Log.log(LogLevel.BASIC, this.id, "Timeout. Decided? " + hasDecided(msg.transactionID)
-                + ". My vote? " + votes.get(msg.transactionID));
+
+
+        if (votes.get(msg.transactionID) == null) {
+            // Unilateral abort
+            this.getSelf().tell(new DSSDecisionResponse(msg.transactionID, DSSDecision.ABORT), getSelf());
+            votes.put(msg.transactionID, DSSVote.NO);
+            Log.log(LogLevel.BASIC, this.id, "Timeout. Haven't voted. Unilaterally aborting");
+            return;
+        }
+
         if (!hasDecided(msg.transactionID)) {
             if (votes.get(msg.transactionID) == DSSVote.YES) {
-                //Log.log(this.id, "Timeout. Asking around.");
-                multicast(new DSSVoteRequest(msg.transactionID));
+                Log.log(LogLevel.BASIC, this.id, "Timeout. Asking around for the decision (vote = yes).");
+                multicast(new DSSDecisionRequest(msg.transactionID));
 
                 // If nobody responds to the timeout (e.g. if the coordinator crashed when everyone was in ready
-                // state and someone received a voteRequest, then the transaction will be aborted as soon as
-                // the next voteRequest arrives
+                // state and someone received a voteRequest, then the transaction will be aborted
+            } else {
+                Log.log(LogLevel.BASIC, this.id, "Timeout. Already voted no, blocking");
             }
         }
     }
@@ -246,17 +276,21 @@ public class DSS extends AbstractNode {
     @Override
     protected void onRecovery(Recovery msg) {
         getContext().become(createReceive());
-        // We don't handle explicitly the "not voted" case here
-        // (in any case, it does not break the protocol)
+
         for (String transactionID : privateWorkspaces.keySet()) {
+            if (votes.get(transactionID) == null) {
+                Log.log(LogLevel.BASIC, this.id, "Recovery. Haven't even voted, I will abort.");
+                this.getSelf().tell(new DSSDecisionResponse(transactionID, DSSDecision.ABORT), getSelf());
+                votes.put(transactionID, DSSVote.NO);
+            }
+
             if (!hasDecided(transactionID)) {
                 Log.log(LogLevel.BASIC, this.id, "Recovery. Asking the coordinator for tID + " + transactionID);
-                coordinators.keySet().forEach(key -> {
-                    ActorRef actor = coordinators.get(key);
-                    delay(r.nextInt(MAX_DELAY));
-                    actor.tell(new DSSDecisionRequest(transactionID), getSelf());
-                    setTimeout(transactionID, DECISION_TIMEOUT);
-                });
+                delay(r.nextInt(MAX_DELAY));
+                coordinators.get(transactionID).tell(new DSSDecisionRequest(transactionID), getSelf());
+                setTimeout(transactionID, DECISION_TIMEOUT);
+            } else {
+                // Do nothing, I have already decided
             }
         }
     }
@@ -273,9 +307,9 @@ public class DSS extends AbstractNode {
     protected void multicastAndCrash(DSSMessage m) {
         for (ActorRef p : dataStores) {
             p.tell(m, getSelf());
-            crash();
-            return;
+            break;
         }
+        crash();
         // coordinators.get(m.transactionID).tell(m, getSelf());
     }
 
@@ -285,31 +319,32 @@ public class DSS extends AbstractNode {
         boolean commit = true;
         List<DataItem> locked = new ArrayList<>();
 
-        for (Iterator<Map.Entry<Integer, DataItem>> iterator = currentPrivateWorkspace.entrySet().iterator();
-             iterator.hasNext() && commit;
-        ) {
-            Map.Entry<Integer, DataItem> modifiedEntry = iterator.next();
+        for (Map.Entry<Integer, DataItem> modifiedEntry : currentPrivateWorkspace.entrySet()) {
             DataItem originalDataItem = this.items.get(modifiedEntry.getKey());
 
-            if (originalDataItem.acquireLock()) {
+            if (originalDataItem.acquireLock(getSelf())) {
                 locked.add(originalDataItem);
             } else {
-                commit = false;
-            }
-
-            if (commit && !originalDataItem.getVersion().equals(modifiedEntry.getValue().getVersion() - 1) &&
-                    !(originalDataItem.getVersion().equals(modifiedEntry.getValue().getVersion()) &&
-                            originalDataItem.getValue().equals(modifiedEntry.getValue().getValue()))) {
                 Log.log(LogLevel.BASIC, this.id, "Failed to acquire lock for item " + modifiedEntry.getKey());
                 commit = false;
+                break;
+            }
+
+            if (!originalDataItem.getVersion().equals(modifiedEntry.getValue().getVersion() - 1) &&
+                    !(originalDataItem.getVersion().equals(modifiedEntry.getValue().getVersion()) &&
+                            originalDataItem.getValue().equals(modifiedEntry.getValue().getValue()))) {
+                Log.log(LogLevel.BASIC, this.id, "Mismatching versions or data for item " + modifiedEntry.getKey());
+                commit = false;
+                break;
             }
         }
 
+        this.lockedItems.put(msg.transactionID, locked);
+
         if (!commit) {
-            this.lockedItems.put(msg.transactionID, locked);
             this.getSelf().tell(new DSSDecisionResponse(msg.transactionID, DSSDecision.ABORT), getSelf());
             votes.put(msg.transactionID, DSSVote.NO);
-            Log.log(LogLevel.BASIC, this.id, "Sending vote NO");
+            Log.log(LogLevel.INFO, this.id, "Sending vote NO");
         } else {
             votes.put(msg.transactionID, DSSVote.YES);
             Log.log(LogLevel.INFO, this.id, "Sending vote YES");

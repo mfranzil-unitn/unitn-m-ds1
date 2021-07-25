@@ -18,10 +18,10 @@ import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
 public abstract class AbstractNode extends AbstractActor {
-    final static int VOTE_TIMEOUT = 50000;      // timeout for the votes, ms
-    final static int DECISION_TIMEOUT = 50000;  // timeout for the decision, ms
+    final static int VOTE_TIMEOUT = 10000;      // timeout for the votes, ms
+    final static int DECISION_TIMEOUT = 10000;  // timeout for the decision, ms
 
-    final static int CRASH_TIME = 7000;
+    final static int CRASH_TIME = 30000;
 
     final static int MAX_DELAY = 100;
 
@@ -61,6 +61,7 @@ public abstract class AbstractNode extends AbstractActor {
 
     protected void crash() {
         getContext().become(crashed());
+        timeouts.clear();
         Log.log(LogLevel.DEBUG, this.id, "Entered crashed mode");
 
         // setting a timer to "recover"
@@ -100,9 +101,10 @@ public abstract class AbstractNode extends AbstractActor {
         return decision.get(transactionID) != null;
     } // has the node decided?
 
-    protected void onDecisionRequest(DSSDecisionRequest msg) {  /* DSSDecision Request */
+    protected void onDSSDecisionRequest(DSSDecisionRequest msg) {
         if (hasDecided(msg.transactionID)) {
-            getSender().tell(new DSSDecisionResponse(msg.transactionID, decision.get(msg.transactionID)), getSelf());
+            getSender().tell(new DSSDecisionResponse(msg.transactionID,
+                    decision.get(msg.transactionID)), getSelf());
         }
         // just ignoring if we don't know the decision
     }

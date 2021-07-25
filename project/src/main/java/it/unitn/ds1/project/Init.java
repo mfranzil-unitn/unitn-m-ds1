@@ -9,15 +9,14 @@ import it.unitn.ds1.project.message.CoordinatorWelcomeMsg;
 import it.unitn.ds1.project.message.DSSWelcomeMsg;
 import it.unitn.ds1.project.message.dss.RequestSummaryMsg;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Scanner;
 
 public class Init {
     final static int N_CLIENTS = 10;
-    final static int N_COORDINATORS = 15;
-    final static int N_DATASTORE = 100;
+    final static int N_COORDINATORS = 5;
+    final static int N_DATASTORE = 30;
     final static int MAX_KEYSTORE = N_DATASTORE * 10 - 1;
 
     // Useless for us
@@ -25,8 +24,6 @@ public class Init {
 
     final static boolean CRASH_COORDINATOR_AFTER_ONE_VOTE_REQUEST = false;
     final static boolean CRASH_COORDINATOR_AFTER_ALL_VOTE_REQUEST = false;
-
-    final static boolean CRASH_COORDINATOR_BEFORE_DECISION_RESPONSE = false;
 
     final static boolean CRASH_COORDINATOR_AFTER_ONE_DECISION_RESPONSE = false;
     final static boolean CRASH_COORDINATOR_AFTER_ALL_DECISION_RESPONSE = false;
@@ -36,7 +33,7 @@ public class Init {
     final static boolean CRASH_DSS_BEFORE_DECISION_RESPONSE = false;
 
 
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) {
         // Logging
         Log.initializeLog(LogLevel.BASIC);
 
@@ -86,27 +83,22 @@ public class Init {
             System.out.flush();
             String response;
 
-            label:
             while (true) {
                 System.out.println("To verify consistency, wait until all transactions " +
                         "have ended and press [y], else [n]. If you wish to stop, press [s].");
                 response = scanner.nextLine();
 
-                switch (response) {
-                    case "y":
-                    case "Y":
-                        for (int j = 0; j < N_DATASTORE; j++) {
-                            RequestSummaryMsg msg = new RequestSummaryMsg();
-                            dataStoreGroup.get(j).tell(msg, ActorRef.noSender());
-                        }
-                        break label;
-                    case "s":
-                    case "S":
-                        system.terminate();
-                        break label;
-                    case "n":
-                    case "N":
-                        break label;
+                if ("y".equals(response) || "Y".equals(response)) {
+                    for (int j = 0; j < N_DATASTORE; j++) {
+                        RequestSummaryMsg msg = new RequestSummaryMsg();
+                        dataStoreGroup.get(j).tell(msg, ActorRef.noSender());
+                    }
+                    break;
+                } else if ("s".equals(response) || "S".equals(response)) {
+                    system.terminate();
+                    break;
+                } else if ("n".equals(response) || "N".equals(response)) {
+                    break;
                 }
             }
 
