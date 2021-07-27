@@ -1,0 +1,63 @@
+\section{The protocol}
+The protocol we designed is a variation of the Two-Phase Commit protocol, adapted to handle multiple transactions. The protocol we designed is fault tolerant without blocking: it blocks only in a specific case that will be discussed later in this chapter.
+
+\subsection{Beginning a transaction}
+When a client wants to start a new transaction it simply chooses a coordinator randomly and sends to it a \url{TxnBeginMsg} specifying its own clientID.
+\newline
+The coordinator will reply to the client with a \url{TxnAcceptedMsg} which signals the client that the transaction has been started successfully and that from now on the only possible outcomes will be either \textbf{COMMIT} or \textbf{ABORT}. Upon receiving the \url{TxnBeginMsg} the coordinator will assign to the transaction performed by the client a globally unique identifier, namely the transactionID.
+
+\subsection{Performing an operation on a data item}
+The client has the possibility to perform two different types of operation over a specific data item: it can perform either a \textbf{READ} or a \textbf{WRITE} operation; of course during a transaction a client can perform operations over an unlimited number of data items.
+\newline
+In order to read the value of a specific data item the client sends to the coordinator a \url{TxnReadRequestMsg}, specifying the data item of which it wants the value. Upon receiving this message the coordinator finds out the data store in charge of that specific key and will send to it a \url{DSSReadRequestMsg}, specifying the transactionID it refers to and the data item the client wants to read.
+\newline
+The data store retrieves the value of the specified data item and replies to the coordinator sending a \url{DSSRead} \url{ResponseMsg}, specifying the transactionID, the data item and the associated value the message refers to.
+\newline
+The coordinator finally translates this message into a \url{TxnReadResultMsg} and sends it back to the client.
+\newline
+The flow to perform a \textbf{WRITE} operation is almost identical: the only key difference is that there is no message returned neither from the data store to the coordinator nor from the coordinator to the client.
+
+\subsection{Ending a transaction}
+In order to end a transaction the client has two options:
+\begin{itemize}
+    \item unilaterally abort the transaction;
+    \item ask the coordinator to commit the transaction.
+\end{itemize}
+In both cases the client sends to the coordinator a \url{TxnEndMsg} specifying its own clientID. In the first case, it will signal that it does want to abort the whole transaction, while in the second case it will specify that it is willing to commit the transaction.
+\newline
+Upon receiving the message the coordinator will behave differently whether the client wants to commit the transaction or not:
+\begin{itemize}
+    \item if the client wants to unilaterally abort the transaction the coordinator simply broadcasts to the data stores a \url{DSSDecisionResponseMsg} with the final decision \textbf{ABORT};
+    \item if the client wants to commit the transaction the coordinator then sends a \url{DSSVoteRequestMsg} to all the data stores, asking for their vote about the specific transaction. Upon receiving this message every data store will check if committing the transaction will leave the items it is responsible for in a consistent state and sends back a \url{DSSVoteResponseMsg} for the specified transaction to the coordinator setting the vote accordingly: if the items will be in a consistent state then the vote will be \textbf{YES}, otherwise the vote will be NO and it will also fix the decision to be \textbf{ABORT}. Upon receiving all the votes the coordinator will take the final decision and will send a \url{DSSDecisionResponseMsg} to all the data stores: if all data stores voted YES the decision will be \textbf{COMMIT}, otherwise it will be \textbf{ABORT}; it will also send back a \url{TxnResultMsg} to the client with the final outcome of the transaction. Upon receiving the \url{DSSDecisionResponseMsg} every data store will behave accordingly: if the decision is \textbf{ABORT} then all the changes made in that transaction will be discarded, otherwise they will become effective.
+\end{itemize}
+
+\subsection{Coordinator crash}
+The actions taken by the data stores and by the coordinator upon restoring depend on then the coordinator crashed:
+\begin{itemize}
+    \item if the coordinator crashed before sending any \url{DSSVoteRequestMsg} then nothing happens and once the coordinator will come back up it will start the vote request;
+    \item if the coordinator crashed after sending some, but not all, the \url{DSSVoteRequestMsg}s then the data store(s) that received the message and sent back the vote will realize that the coordinator crashed and will perform the temination protocol. Upon restoring the coordinator will ask all the data stores if they managed to take a decision: if so the coordinator will agree, otherwise it will simply decide to abort;
+    \item if the coordinator crashes before sending any \url{DSSDecisionResponseMsg} then the timeout of the data stores will expire and they will proceed as in the previous case. The only difference is that upon restoring the coordinator will send to all data stores its decision: if they did not manage to take a decision they will be informed of the decision while if they managed to take a decision without the coordinator they will simply ignore the message because it will be the same decision;
+    \item if the coordinator crashes after sending some, but not all, \url{DSSDecisionResponseMsg}s then the timout of the data stores that did not receive the message will expire and they will run the termination protocol: they will contact one of the stores that got the decision message and they will be informed of the decision. Upon restore the coordinator sends again all the messages but they will be ignored by the stores since the decision of the coordinator will be the same as the previous one.
+\end{itemize}
+
+\subsection{Data store crash}
+The actions taken by the other data stores, by the coordinator and by the data store upon recovery depend on when the crash happened:
+\begin{itemize}
+    \item if the datastore crashes before receiving any vote request or before deciding its vote, then coordinator's timeout will expire and it will just decide \textbf{ABORT}, sending a \url{DSSDecisionResponseMsg} to all the data stores. Upon recovery the data store will realize that it has not voted and will simply \textbf{ABORT}. Note that this also works for the other transactions: while the data store was not alive he might have missed some operations, so it will just abort not to create inconsistencies;
+    \item if the datastore crashes before sending back its vote, then the coordinator's timeout will expire and it will just decide \textbf{ABORT}, sending a \url{DSSDecision} \url{ResponseMsg} to all the data stores. Upon recovery the data store takes actions with respect to its vote: if it voted NO then it just aborts, otherwise it asks to the coordinator, and other data stores, for the final outcome of the decision;
+    \item if the datastore crashes after sending its vote to the coordinator but before receiving the \url{DSSDecisionResponseMsg}, then the coordinator does nothing. Upon recovery the data store will take actions with respect to its vote: if the vote is NO than nothing happens since he already decided to abort, otherwise it will just ask other data stores and the coordinator for the final outcome of the transaction.
+\end{itemize}
+
+\subsection{Termination protocol}
+When the coordinator crashes before sending all the \url{DSSDecisionResponseMsg}s, the data stores will run a simple protocol to determine whether they can take a decision without the coordinator; in particular when the timeout of a data store for the upper cited message expires it performs the following actions:
+\begin{itemize}
+    \item it will send a \url{DSSDecisionRequestMsg} to all data stores;
+    \item upon receiving this \url{DSSDecisionRequestMsg} if the data store already knows the final outcome of the transaction it replies with a \url{DSSDecisionResponseMsg}, setting the decision it know;
+    \item upon receiving a \url{DSSDecisionResponseMsg} the data stores fixes its own decision so that it matches with the one in the message.
+    \item if it receives no \url{DSSDecisionResponseMsg} then it means that the coordinator crashed and none of the other stores knows the final decision, therefore it is necessary to wait for the coordinator to come back up.
+\end{itemize}
+This is useful in case there one or more data stores that voted \textbf{NO}: in this case the final outcome of the transaction has already been decided because the only plausible final decision for the coordinator will be \textbf{ABORT}.
+\newline
+On the other hand if all data stores voted \textbf{YES} then no assumptions can be made and they must wait the coordinator: it is possible that there is a data store that crashed after voting \textbf{NO} and they do not know about it.
+
+

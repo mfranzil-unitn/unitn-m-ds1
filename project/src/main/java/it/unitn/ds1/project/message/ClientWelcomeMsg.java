@@ -3,8 +3,6 @@ package it.unitn.ds1.project.message;
 import akka.actor.ActorRef;
 
 import java.io.Serializable;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
 // send this message to the client at startup to inform it about the coordinators and the keys
@@ -14,6 +12,6 @@ public class ClientWelcomeMsg implements Serializable {
 
     public ClientWelcomeMsg(int maxKey, List<ActorRef> coordinators) {
         this.maxKey = maxKey;
-        this.coordinators = Collections.unmodifiableList(new ArrayList<>(coordinators));
+        this.coordinators = List.copyOf(coordinators);
     }
 }

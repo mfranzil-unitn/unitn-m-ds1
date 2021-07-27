@@ -1,0 +1,44 @@
+\section{Introduction}
+The purpose of this paper is to report the content of the project assignment, how we interpreted it, the reasoning we made in order to solve the problem and the protocol we came up with.
+
+\subsection{The problem}
+The problem assigned was the following: given three actor types, namely Client, Coordinator and Datastore, we had to design a protocol which would allow multiple clients to perform transactions on the data items mantained by multiple datastores through a coordinator; this transactions had to be atomic and do not interfere with each other. The protocol proposed had also to be fault resistant, meaning that it had to survive the case of crashes by any of the involved actors, at least in the validation phase.
+
+\subsection{The client actor}
+The client is the starting point of the protocol: once it wants to start a new transaction it contacts one of the coordinators and signals them the intention to begin a new transaction.
+\newline
+Once it is notified by the coordinator that the transaction has been correctly accepted the client can start sending READ/WRITE requests on data items to the coordinator; in case of a READ request on a data item \textit{x} he will also receive back the value associated to the data item \textit{x}.
+\newline
+When the client has no more actions to perform and it wants to close the transaction it sends a "transaction end message" to the coordinator which will respond with a message containing the outcome of the transaction: either COMMIT or ABORT.
+\newline
+In our scenario we assumed that each client performs once transaction at a time, as specified in the project assignment; later in this paper it is discussed what would happen if a client performs multiple transactions at a time and how would it be possible to fix issues, if any.
+
+\subsection{The coordinator actor}
+The coordinator is the meeting point between clients and datastores; in particular it is in charge of handling the beginning/end of the transactions, forward the READ/WRITE requests from clients to datastores and possible results of such requests from datastores to the appropriate clients.
+\newline
+It is also responsible for handling the datastore outcomes and take the final decision about a transaction outcome following the rules of the protocol.
+\newline
+In our scenarios we assumed that the coordinator could only crash in the middle of a decision process, meaning that if there is only one client talking to it the coordinator will only crash in one of the following cases:
+\begin{itemize}
+    \item the coordinator did receive the transaction end request and did not send anything to the datastores;
+    \item the coordinator did send vote requests to the datastores but it has not taken a decision yet;
+    \item the coordinator did take a decision but did not manage to inform any datastore;
+    \item the coordinator did take a decision and informed only some of the datastores.
+\end{itemize}
+In case of crash the coordinator acts differently depending on when it crashed; we assumed that every coordinator is able to restore from a reliable storage, in our case the instance variables.
+
+\subsection{The datastore actor}
+
+The datastore is in charge of handling data items; in particular each datastore handles a configurable number of items, ten in our case, and it has to keep them consistent among transactions.
+\newline
+The datastore receives from coordinators the READ/WRITE requests for a specific transaction and performs them in a separate space, named \textit{private workspace}; each data item is also associated with a version number used to check consistency when it needs to decide if a transaction can be committed or not.
+\newline
+When the datastore receives a vote request for a transaction it checks if the transaction leaves the store in a consistent state: if it is case then it votes \textit{YES}, otherwise it votes \textit{NO}.
+\newline
+In our scenarios we assumed that the datastore could only crash in the middle of a decision process, meaning that if there is only one transaction going on the single datastore will only crash in one of the following cases:
+\begin{itemize}
+    \item the datastore did not vote for the transaction yet;
+    \item the datastore did vote for the transaction but did not manage to send its vote;
+    \item the datastore did manage to send its vote but it did not receive the final outcome from the coordinator.
+\end{itemize}
+Depending on when the datastore has crashed it will recover performing different actions; we assumed that the datastore can recover from a reliable storage which, as stated above, is represented by the instance variables.

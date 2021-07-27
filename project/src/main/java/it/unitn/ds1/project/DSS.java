@@ -120,15 +120,6 @@ public class DSS extends AbstractNode {
             DataItem copy = new DataItem(this.items.get(msg.key));
             currentPrivateWorkspace.put(msg.key, copy);
         }
-/*
-        try {
-            writeAheadLog.write(id + "@" + msg.transactionID + ";" + msg.key
-                    + "=" + msg.value + ";v=" + currentPrivateWorkspace.get(msg.key).getVersion());
-            writeAheadLog.flush();
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-        */
 
         currentPrivateWorkspace.get(msg.key).setValue(msg.value, null);
         currentPrivateWorkspace.get(msg.key).incrementVersion(null);

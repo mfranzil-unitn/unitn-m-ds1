@@ -32,20 +32,20 @@ public class DataItem {
     }
 
     public void setValue(Integer value, ActorRef locker) {
-        if (locker == null) {
+        if (locker == null) { // privateworkspace case
         } else if (locker != this.locker) throw new RuntimeException(
                 "Wrong locker! " + locker + " vs " + this.locker);
         this.value = value;
     }
 
     public void setVersion(Integer version, ActorRef locker) {
-        if (locker == null) {
+        if (locker == null) { // privateworkspace case
         } else if (locker != this.locker) throw new RuntimeException("Wrong locker!");
         this.version = version;
     }
 
     public void incrementVersion(ActorRef locker) {
-        if (locker == null) {
+        if (locker == null) { // privateworkspace case
         } else if (locker != this.locker) throw new RuntimeException("Wrong locker!");
         if (!touched) {
             touched = true;

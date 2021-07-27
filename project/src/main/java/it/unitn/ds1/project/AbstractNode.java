@@ -37,7 +37,6 @@ public abstract class AbstractNode extends AbstractActor {
         this.decision = new HashMap<>();
         this.timeouts = new HashMap<>();
         this.r = new Random();
-
     }
 
     @Override
@@ -55,9 +54,12 @@ public abstract class AbstractNode extends AbstractActor {
     }
 
     // abstract methods to be implemented in extending classes
-
     protected abstract void onRecovery(Recovery msg);
     protected abstract void onTimeout(Timeout msg);
+
+    // multicast
+    protected abstract void multicast(DSSMessage m);
+    protected abstract void multicastAndCrash(DSSMessage m);
 
     protected void crash() {
         getContext().become(crashed());
@@ -72,12 +74,6 @@ public abstract class AbstractNode extends AbstractActor {
                 getContext().system().dispatcher(), getSelf()
         );
     }
-
-    // multicast
-    protected abstract void multicast(DSSMessage m);
-
-    protected abstract void multicastAndCrash(DSSMessage m);
-
 
     // schedule a Timeout message in specified time
     protected void setTimeout(String transactionID, int time) {
@@ -118,7 +114,6 @@ public abstract class AbstractNode extends AbstractActor {
             e.printStackTrace();
         }
     }
-
 }
 
 

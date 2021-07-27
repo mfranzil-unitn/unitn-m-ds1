@@ -66,9 +66,7 @@ public class Coordinator extends AbstractNode {
 
                 // COORDINATOR <- DSS
                 .match(DSSReadResultMsg.class, this::onDSSReadResult)
-
                 .match(DSSVoteResponse.class, this::onDSSVoteResponse)
-
                 .match(DSSDecisionRequest.class, this::onDSSDecisionRequest)
 
                 .match(Timeout.class, this::onTimeout)
@@ -144,8 +142,9 @@ public class Coordinator extends AbstractNode {
             destination.tell(new TxnResultMsg(false), getSelf());
         } else {
             setTimeout(transactionID, VOTE_TIMEOUT);
-            //crashyVoteRequest(transactionID);
             multicast(new DSSVoteRequest(transactionID));
+            //crashyVoteRequest(transactionID);
+            //return;
         }
     }
 
@@ -173,8 +172,9 @@ public class Coordinator extends AbstractNode {
             Log.log(LogLevel.BASIC, this.id, "Timeout. Decision not taken, I'll just abort.");
             fixDecision(msg.transactionID, DSSDecision.ABORT);
 
-            // crashyDecisionResponse(msg.transactionID);
             multicast(new DSSDecisionResponse(msg.transactionID, decision.get(msg.transactionID)));
+            // crashyDecisionResponse(msg.transactionID);
+            // return;
 
             // Inform client of sad decision
             ActorRef destination = transactionMapping.getKey(msg.transactionID);
@@ -266,10 +266,13 @@ public class Coordinator extends AbstractNode {
                 fixDecision(transactionID, DSSDecision.ABORT);
             }
 
-            // crashyDecisionResponse(msg.transactionID);
             multicast(new DSSDecisionResponse(transactionID, decision.get(transactionID)));
+            // we can make the coordinator crash on recovery, but it would be a bit harsh
+            // crashyDecisionResponse(msg.transactionID);
+            // return;
 
             client.tell(new TxnResultMsg(decision.get(transactionID) == DSSDecision.COMMIT), getSelf());
+
         });
     }
 

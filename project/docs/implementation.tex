@@ -1,0 +1,75 @@
+\section{Implementation}
+In this section it is described how we practically implemented all the aspects of the protocol; it will not be discussed how we implemented the Client actor, since the code has been provided by the instructor.
+\newline
+A common thing among the two actors we implemented is that in all the uni-cast communications we added a random delay in order to emulate network traffic
+
+\subsection{Coordinator: beginning a transaction}
+As said before, the transaction is initiated by the client using a \url{TxnBeginMsg}; upon receiving this message the coordinator generates a brand new random UUID and uses this as a unique identifier of the transaction. The transaction ID is then registered in a bidirectional map named \url{transactionMapping} and it is associated with the \url{ActorRef} of the client that sent the message. We adopted this solution because we need to efficiently find the transaction ID to which every client is associated and also efficiently find the \url{ActorRef} of a client associated to a given transaction ID in order to be able to send back to the client the result of possible \textbf{READ} operations on data items.
+\newline
+This map is also used by the coordinator upon recovery to determine which are the ongoing transactions that might have been already decided by the data stores using the termination protocol.
+
+\subsection{Coordinator: ending a transaction}
+Upon receiving a \url{TxnEndMsg} from the client the coordinator retrieves from the map the corresponding transaction ID and issues a new vote request for the transaction by sending a \url{DSSVoteRequest} to all the data stores, setting a timeout in order to be able to detect possible crashes.
+\newline
+When the coordinator collected all votes the coordinator fixes its decision for the current transaction, creating a new record in the \url{decision} map; the actual value stored in the map depends on whether all the stores voted \textbf{YES}: if this is the case then the decision will be \textbf{COMMIT}, otherwise it will be \textbf{ABORT}.
+\newline
+Once it fixed its decision it sends a new \url{DSSDecisionResponseMsg} to all data stores informing them of its decision for the current transaction; it also sends a new \url{TxnResultMsg} to the client to inform it of the final outcome by retrieving the correct \url{ActorRef} from the \url{transactionMapping} map.
+
+\subsection{Data store: data items}
+A single data store is in charge of ten data items which are assigned to it at creation time; every data item is a simple structure containing:
+\begin{itemize}
+    \item \url{value}: an Integer indicating the value of the data item;
+    \item \url{version}: an Integer indicating the version of the data item. It can be incremented only once during the item lifetime.;
+    \item \url{touched}: a Boolean value indicating whether the version of this item has already been incremented.
+    \item \url{locked}: an AtomicInteger indicating whether the data item is locked or not;
+    \item \url{locker}: the ActorRef of the locker to ensure no locks from other actors, it has been used for debugging purposes.
+\end{itemize}
+The data items are stored in a map named \url{items}, having as key an integer representing their "name".
+The data item class also exposes three useful methods that are used for its management:
+\begin{itemize}
+    \item \url{void incrementVersion(ActorRef locker)}: it increments the version of the item by 1 if it was not yet been done. This employees a at-most-once semantic;
+    \item \url{boolean acquireLock(ActorRef locker)}: it attempts to acquire a mutual exclusive lock on the item by using the CompareAndSet operation. The return value is the result of the locking attempt;
+    \item \url{void releaseLock()}: it releases the lock from the item and also sets locker to null.
+\end{itemize}
+The \url{locker} parameter in the method is used to check that the one issuing the operation is the one actually having the lock; in case of the acquireLock operation if the lock is acquired than the locker property of the data item.
+
+\subsection{Data store: private workspaces}
+When the client performs \textbf{READ}/\textbf{WRITE} operations they do not reflect immediately on the actual data items: they are executed in a separate memory region and only at the end they are made effective, if they do not create inconsistencies.
+\newline
+When the first \textbf{READ}/\textbf{WRITE} request is received then a new private workspace is associated to the transaction ID using the \url{privateWorkspaces} map.
+\newline
+A private workspace is just a map associating integer keys to DataItems.
+\newline
+Upon receiving a request the private workspace associated to the transaction ID is retrieved, or a brand new one is created. The requested operation is performed on the requested item in the private workspace: if the item is not yet present in the private workspace then a copy of the original item is made and inserted into it.
+\newline
+The management of the data item inside the private workspace is pretty much the same whether the operation is a \textbf{READ} or a \textbf{WRITE}; the key difference is that if it is a \textbf{WRITE} operation than the incrementVersion() method on the data item in the private workspace is invoked.
+We decided to increment the version of the data item in the private workspace only for \textbf{WRITE} requests in order to achieve better liveness among transactions performing only \textbf{READ} operations.
+
+\subsection{Data store: checking for consistency}
+Upon receiving a \url{DSSVoteRequestMsg} the data store checks if it already decided for the specific transaction by looking into the \url{vote} and in the \url{decision} maps : if so it simply responds back with the vote, otherwise it checks whether committing the transaction would leave the store in a consistent state.
+\newline
+To do so it retrieves the correct private workspace for the current transaction and it performs the following steps for every item in the workspace:
+\begin{itemize}
+    \item it tries to acquire the lock on the corresponding item in \url{items}: if it fails then it votes NO immediately;
+    \item it checks if either the version in the private workspace is exactly one after the one of the original item or the versions are the same and also the values are the same. If none of these is true than it votes NO immediately.
+\end{itemize}
+The second condition guarantees that if the client only performed read operations on the item than the transaction does not get aborted because of other previous read operations by other transactions on the same item; it also guarantees that in case the client performed even a single WRITE operation than the current value in the store is the same as the one he could have read before performing the \textbf{WRITE} operations: this works because the version of the data item in the private workspace gets incremented as soon as the first \textbf{WRITE} operation is performed and it cannot be decreased anymore.
+\newline
+As we mentioned before the locking operation is performed by mean of the CompareAndSet operation: as soon as one of these operations the data store immediately votes NO. Taking into consideration that the CompareAndSet is a wait-free operation from the concurrency point of view is safe to say that the our implementation is indeed deadlock-free; in the worst case scenario there will be a lot of transactions aborting.
+\newline
+All the items that have been locked, regardless of the vote, get stored associated with the transaction ID of the current transaction in the \url{lockedItems} map: they need to be unlocked as soon as the node takes a final decision.
+\newline
+With the given implementation of the client it is easy to check for inconsistency: at the end of all the transactions the sum of all data items must be the sum of all data items before the first transaction.
+\newline
+Please note that at the end of every "wave" of client transactions it is possible to interact with the system to make it print the current value of all data stores as well as temporarily stop the executions to check the actual consistency by following.
+
+\subsection{Data store: taking a decision}
+After the data store sent its vote it needs to take its final decision about the transaction(s) for which it sent a vote; this can happen with two different modalities depending on its vote:
+\begin{itemize}
+    \item the data store voted \textbf{NO}: in this case it also fixes its decision to be \textbf{ABORT}, because the coordinator cannot decide \textbf{COMMIT} with even a single \textbf{NO} vote. This is done by sending itself a \url{DSSDecisionResponseMsg} immediately after voting, so that it can unlock the items as soon as possible;
+    \item the data store voted YES: in this case it must wait for the \url{DSSDecisionResponseMsg} coming from the coordinator.
+\end{itemize}
+Upon receiving the \url{DSSDecisionResponseMsg} the data store checks the final decision and acts accordingly: if the decision is \textbf{COMMIT} then it applies the changes to the real items.
+In both cases the data store releases the locks it acquired over the items, fixes the decision and simply discards everything related to the transaction, except made for the vote and the final decision.
+\subsection{Crashing}
+The "crashed" state is actually not a real crash but it is a simulated one: a node that is crashed is in reality running but it is simply discarding every message it receives. We decided to act this way because it was, in our opinion, simpler than killing the node and it also allows us to make use of its properties as a safe storage.

@@ -14,13 +14,10 @@ import java.util.List;
 import java.util.Scanner;
 
 public class Init {
-    final static int N_CLIENTS = 10;
+    final static int N_CLIENTS = 5;
     final static int N_COORDINATORS = 5;
-    final static int N_DATASTORE = 30;
+    final static int N_DATASTORE = 15;
     final static int MAX_KEYSTORE = N_DATASTORE * 10 - 1;
-
-    // Useless for us
-    // final static boolean CRASH_COORDINATOR_BEFORE_VOTE_REQUEST = false;
 
     final static boolean CRASH_COORDINATOR_AFTER_ONE_VOTE_REQUEST = false;
     final static boolean CRASH_COORDINATOR_AFTER_ALL_VOTE_REQUEST = false;
@@ -28,7 +25,6 @@ public class Init {
     final static boolean CRASH_COORDINATOR_AFTER_ONE_DECISION_RESPONSE = false;
     final static boolean CRASH_COORDINATOR_AFTER_ALL_DECISION_RESPONSE = false;
 
-    // the dss who crashes is always #1000
     final static boolean CRASH_DSS_BEFORE_VOTE_RESPONSE = false;
     final static boolean CRASH_DSS_BEFORE_DECISION_RESPONSE = false;
 

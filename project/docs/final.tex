@@ -1,0 +1,51 @@
+\section{Issues, fixes and improvements}
+In this final part possible issues with our implementation will be discussed, as well as possible fix. Other than this there will also be some proposals that could make the protocol we designed and the overall architecture of the various nodes more resilient to fail and possibly to eliminate the cases in which the protocol requires blocking.
+
+\subsection{Issues}
+
+\subsubsection{Implementation issues}
+
+One first issue that comes straight from how the coordinators map the clients to transactions is that they use a bidirectional map: we adopted this method because in the project assignment is clearly stated that each client can make at most one transaction at a time. In case a single client decides to make more than one transaction clearly the implementation breaks, because the previous transaction ID gets discarded when a successive one begins. In order to solve this it would be, in our opinion, change a little the \textit{transactionMapping} map in the coordinator and make assign a single transaction ID to a single ActorRef; in this way the new transaction will simply create a new assignment in the map. This is not enough: the client should also specify, using the transaction ID, in which transaction it is willing to perform a given operation. At the implementation level the change would be really small and also at the protocol level: it would be enough to add the transaction ID to every message sent from the client to the chosen coordinator. The data store would have no difference: they do not have the notion of client, but only the one of transaction ID.
+\newline
+Another possible issue regards the fact that the client will begin a transaction choosing a coordinator and will interact with that transaction only sending messages to that coordinator; if the client would have the possibility to perform operations contacting different coordinators the protocol does not work anymore. A proposal to possibly handle this situation could be adding a second decision message wave to all the coordinators: when a coordinator receives a \url{TxnEndMsg} containing the transaction ID \textit{tID} it will issue a vote request to all the data stores for the transaction with identifier \textit{tID}, take a decision for that transactions and then inform the data stores and the other coordinators about it. This also requires that the client sends the transaction ID of the transaction in which it wants to perform the operation: this is needed because in the current implementation a coordinator that was not the one which accepted the transaction does not know the mapping between the client and the corresponding transaction ID.
+\newline
+The third issue we would like to discuss is the fact that \textbf{WRITE} operations do not have a proper acknowledgment message: this is not a problem in the sense that it breaks the protocol, but it can be seen as a performance issue.
+Let's take, as a example, that a data store crashes while performing a write operation: the coordinator will never know it crashed. By inserting an acknowledgment message the coordinator would instead know that the data store crashed and it could set its decision to \textbf{ABORT} immediately: when the client tries to commit the transaction the coordinator will simply broadcast to the data stores the \textbf{ABORT} decision instead of performing the vote request, saving note.
+Please note that with the current implementation the transaction would also abort, because the data store will fix its vote to \textbf{NO} upon restoring for all transactions that are not yet complete: this is done on purpose to handle the fact that it might have missed some of the \textbf{READ}/\textbf{WRITE} requests.
+\newline
+One more issue that comes to our mind is the fact that two transaction that operate on two common items with WRITE \textbf{operations} do try to commit simultaneously: the first transaction gets the lock only on the first item and the second one gets the lock only on the second. In this case both the transaction will ABORT: the locking mechanism we adopted does not cause deadlock but it could lead to some liveness issues. A more sophisticated solution, in our opinion, would be to make the locking phase atomic in the sense that there can be only one transaction at a time trying to acquire the locks; this is possible by acquiring a temporary lock on the whole data store but would cause that all the other concurrent transactions would have to wait for it to finish acquiring locks. This solution would solve the problem just mentioned but as we explained would lead to unpredictable waiting periods therefore we did decide not to adopt it.
+\newline
+One last problem we would like to discuss is how the timeout is set: at the moment the timeout for every message is set as a constant, but we noticed that this approach is not really efficient or reliable: the larger the number of nodes in the system, the more messages need to arrive before a response is sent and this could lead to timeout expiration while the other party is not crashed; this does not really break the protocol but is acceptable for large-scale system. Our proposal would be to set an adaptive timeout, depending on the amount of traffic in the network and the number of nodes participating in the system. Additionally, the performance of the host system needs to be taken into account, as we noticed that during our stress tests (e.g. with 90+ clients, 1000+ datastores), the system would run out its allocated 2GB of RAM pretty quickly.
+
+\subsubsection{Performance issues}
+
+Another aspect we would like to discuss is the actual performance ratio we measured during transaction validation. In other words, we noticed that the performance of this project is subject to the constraints of the well-known \textit{Birthday problem}\footnote{\url{https://en.wikipedia.org/wiki/Birthday_problem}}. In this case, we have $n$ set as the number of total datastore items, while the number of people that draw from the pool of numbers are the set of writes directed by the clients. Assume we have the following hypothetical setting:
+
+\begin{itemize}
+    \item 1000 datastore items (100 datastore instances)
+    \item 5 competing clients running transactions concurrently
+    \item each client performs one transaction
+    \item each transaction is composed on average of 15 writes.
+\end{itemize}
+
+In this case, we would have $15 \cdot 5$ total writes. Each of this write may overlap with another one. Without adding pages of mathematical formulas, by checking the Wikipedia article we could derive that the probability that all writes involve different data items is:
+
+$$
+ \frac{_{1000}P_n}{1000^n} = \frac{_{1000}P_{75}}{1000^{75}} =
+ \frac{\frac{1000!}{(1000-75)!}}{1000^{75}} = 0.058
+$$
+
+Thus the probability that at least two writes are clashing is $1 - 0.058 = 0.942$. This is a very high probability: surely, at least one transaction will have to abort due to concurrent locking.
+
+Of course, the real world case is much more unpredictable and complicated than this example. However, this goes to show that assuming randomly chosen writes as with the birthday problem, we would need a very high number of datastore items in order to minimize concurrent locking and maximize the number of committed transactions. We experimented with different setups of both datastore items and transaction numbers, and found that the default number (up to 40 writes per transaction!) would not fit well with a higher number of clients, and thus decided to lower it.
+
+\subsection{Improvements}
+The protocol we designed does indeed require blocking for some specific cases which are the following:
+\begin{itemize}
+    \item the datastores wait if the coordinator crashed before signalling the start of the validation phase of the transaction - this is necessary, as datastores don't know whether more R/W requests will arrive or the transaction will end;
+    \item the datastores wait if the coordinator crashed before sending any \url{DSSDecisionResultMsg} and all data stores voted YES;
+    \item the client waits in any of the cases in which the coordinator crashes.
+\end{itemize}
+To handle the second case it could be possible to change our reference protocol to the 3-Phase-Commit protocol: in this case the data stores would elect a new coordinator that would complete the decision process.
+\newline
+To handle the first case it could be possible to give the possibility to the client to contact different coordinators for performing operations within the context of the same transaction: the client sets a timeout and when it expires it simply tries to issue the same request to another coordinator. In this last case the only case in which the client is forced to wait is when all the coordinators crashed, but as long as one of them is correct then the client can proceed.
