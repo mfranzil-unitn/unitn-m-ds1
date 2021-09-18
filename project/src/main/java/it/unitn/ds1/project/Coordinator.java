@@ -42,6 +42,8 @@ public class Coordinator extends AbstractNode {
     // list of DSS contacted for a transaction
     private final HashMap<String, Set<ActorRef>> dataStoreMapping = new HashMap<>();
 
+    final static int CRASH_TIME = 40000;
+
     /*-- Actor constructor ---------------------------------------------------- */
 
     public Coordinator(int id) {
@@ -205,9 +207,9 @@ public class Coordinator extends AbstractNode {
                 fixDecision(msg.transactionID, DSSDecision.COMMIT);
                 yesVotersMap.remove(msg.transactionID);
 
-                multicast(new DSSDecisionResponse(msg.transactionID, decision.get(msg.transactionID)));
-                //crashyDecisionResponse(msg.transactionID);
-                //return;
+                //multicast(new DSSDecisionResponse(msg.transactionID, decision.get(msg.transactionID)));
+                crashyDecisionResponse(msg.transactionID);
+                return;
             } else {
                 Log.log(LogLevel.INFO, this.id, "Received some YES votes. Keep going");
                 return; // nothing to do, we need to wait some more
@@ -233,7 +235,7 @@ public class Coordinator extends AbstractNode {
                         (Init.CRASH_COORDINATOR_AFTER_ONE_DECISION_RESPONSE && Init.CRASH_COORDINATOR_AFTER_ALL_DECISION_RESPONSE)
         ) {
             multicast(new DSSDecisionResponse(transactionID, decision.get(transactionID)));
-            crash();
+            crash(CRASH_TIME);
         } else {
             multicast(new DSSDecisionResponse(transactionID, decision.get(transactionID)));
         }
@@ -247,7 +249,7 @@ public class Coordinator extends AbstractNode {
                         (Init.CRASH_COORDINATOR_AFTER_ONE_VOTE_REQUEST && Init.CRASH_COORDINATOR_AFTER_ALL_VOTE_REQUEST)
         ) {
             multicast(new DSSVoteRequest(transactionID));
-            crash();
+            crash(CRASH_TIME);
         } else {
             multicast(new DSSVoteRequest(transactionID));
         }
@@ -291,7 +293,7 @@ public class Coordinator extends AbstractNode {
             datastore.tell(m, getSelf());
             break;
         }
-        crash();
+        crash(CRASH_TIME);
     }
 
     /* -- Auxiliary ------------------------ */

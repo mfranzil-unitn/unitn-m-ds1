@@ -21,9 +21,7 @@ public abstract class AbstractNode extends AbstractActor {
     final static int VOTE_TIMEOUT = 10000;      // timeout for the votes, ms
     final static int DECISION_TIMEOUT = 10000;  // timeout for the decision, ms
 
-    final static int CRASH_TIME = 30000;
-
-    final static int MAX_DELAY = 100;
+    final static int MAX_DELAY = 5;
 
     protected int id;                           // node ID
 
@@ -61,14 +59,14 @@ public abstract class AbstractNode extends AbstractActor {
     protected abstract void multicast(DSSMessage m);
     protected abstract void multicastAndCrash(DSSMessage m);
 
-    protected void crash() {
+    protected void crash(int crashTime) {
         getContext().become(crashed());
         timeouts.clear();
         Log.log(LogLevel.DEBUG, this.id, "Entered crashed mode");
 
         // setting a timer to "recover"
         getContext().system().scheduler().scheduleOnce(
-                Duration.create(AbstractNode.CRASH_TIME, TimeUnit.MILLISECONDS),
+                Duration.create(crashTime, TimeUnit.MILLISECONDS),
                 getSelf(),
                 new Recovery(), // message sent to myself
                 getContext().system().dispatcher(), getSelf()

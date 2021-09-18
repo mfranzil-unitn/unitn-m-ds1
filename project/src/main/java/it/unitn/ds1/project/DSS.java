@@ -36,6 +36,10 @@ public class DSS extends AbstractNode {
     private final Map<String, List<DataItem>> lockedItems = new HashMap<>();
     private final Map<String, ActorRef> coordinators = new HashMap<>();
     private final Map<String, DSSVote> votes = new HashMap<>();
+
+    final static int CRASH_TIME = 20000;
+
+
     //private final Map<String, Boolean> alreadyTimedOut = new HashMap<>();
 
     //private final BufferedWriter writeAheadLog;
@@ -160,20 +164,24 @@ public class DSS extends AbstractNode {
         }
 
         if (Init.CRASH_DSS_BEFORE_VOTE_RESPONSE) {
-            crash();
+            crash(CRASH_TIME);
             return;
         }
 
         delay(r.nextInt(MAX_DELAY));
         this.getSender().tell(new DSSVoteResponse(msg.transactionID, votes.get(msg.transactionID)), getSelf());
 
+        if (id == 1009) {
+            crash(CRASH_TIME);
+            return;
+        }
         //if (!this.alreadyTimedOut.get(msg.transactionID)) {
         //    this.alreadyTimedOut.put(msg.transactionID, true);
         setTimeout(msg.transactionID, DECISION_TIMEOUT);
         //}
 
         if (Init.CRASH_DSS_BEFORE_DECISION_RESPONSE) {
-            crash();
+            crash(CRASH_TIME);
         }
     }
 
@@ -300,7 +308,7 @@ public class DSS extends AbstractNode {
             p.tell(m, getSelf());
             break;
         }
-        crash();
+        crash(CRASH_TIME);
         // coordinators.get(m.transactionID).tell(m, getSelf());
     }
 

@@ -24,10 +24,10 @@ import java.util.concurrent.TimeUnit;
 
 public class Client extends AbstractActor {
 
-    private static final double COMMIT_PROBABILITY = 0.9999;
+    private static final double COMMIT_PROBABILITY = 1;
     private static final double WRITE_PROBABILITY = 0.5;
 
-    private static final int MAX_SEQUENTIAL_TXN = 10;
+    private static final int MAX_SEQUENTIAL_TXN = 1;
 
     private static final int MIN_TXN_LENGTH = 5;
     private static final int MAX_TXN_LENGTH = 10;

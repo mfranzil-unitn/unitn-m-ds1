@@ -14,15 +14,15 @@ import java.util.List;
 import java.util.Scanner;
 
 public class Init {
-    final static int N_CLIENTS = 5;
+    final static int N_CLIENTS = 1;
     final static int N_COORDINATORS = 5;
-    final static int N_DATASTORE = 15;
+    final static int N_DATASTORE = 10;
     final static int MAX_KEYSTORE = N_DATASTORE * 10 - 1;
 
     final static boolean CRASH_COORDINATOR_AFTER_ONE_VOTE_REQUEST = false;
     final static boolean CRASH_COORDINATOR_AFTER_ALL_VOTE_REQUEST = false;
 
-    final static boolean CRASH_COORDINATOR_AFTER_ONE_DECISION_RESPONSE = false;
+    final static boolean CRASH_COORDINATOR_AFTER_ONE_DECISION_RESPONSE = true;
     final static boolean CRASH_COORDINATOR_AFTER_ALL_DECISION_RESPONSE = false;
 
     final static boolean CRASH_DSS_BEFORE_VOTE_RESPONSE = false;
@@ -31,7 +31,7 @@ public class Init {
 
     public static void main(String[] args) {
         // Logging
-        Log.initializeLog(LogLevel.BASIC);
+        Log.initializeLog(LogLevel.DEBUG);
 
         // Create the actor system
         final ActorSystem system = ActorSystem.create("project");
